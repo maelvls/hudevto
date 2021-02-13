@@ -17,7 +17,7 @@ import (
 	"github.com/spf13/jwalterweatherman"
 	"github.com/spf13/viper"
 
-	"github.com/maelvls/devto-to-hugo/logutil"
+	"github.com/maelvls/hudevto/logutil"
 )
 
 var (

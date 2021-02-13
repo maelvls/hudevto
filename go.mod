@@ -1,4 +1,4 @@
-module github.com/maelvls/devto-to-hugo
+module github.com/maelvls/hudevto
 
 go 1.15
 
