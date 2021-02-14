@@ -12,7 +12,10 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
+	"github.com/MakeNowJust/heredoc"
 	"github.com/VictorAvelar/devto-api-go/devto"
 	"github.com/gohugoio/hugo/common/loggers"
 	"github.com/gohugoio/hugo/deps"
@@ -91,70 +94,168 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 		return fmt.Errorf("devto client: %w", err)
 	}
 
+	articles, err := client.Articles.ListMyUnpublishedArticles(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("fetching unpublished articles: %s", err)
+	}
+	articlesPub, err := client.Articles.ListMyPublishedArticles(context.Background(), nil)
+	if err != nil {
+		return fmt.Errorf("fetching published articles: %s", err)
+	}
+	articles = append(articles, articlesPub...)
+	articlesIdMap := make(map[int]*devto.ListedArticle)
+	articlesTitleMap := make(map[string]*devto.ListedArticle)
+	for i := range articles {
+		art := &articles[i]
+		articlesIdMap[int(art.ID)] = art
+		articlesTitleMap[art.Title] = art
+	}
+
 	for _, page := range sites.Pages() {
 		if page.Kind() != "page" {
 			continue
 		}
 
-		idRaw, err := page.Param("devto")
+		draft := true
+		draftRaw, err := page.Param("draft")
+		if err == nil {
+			draft = draftRaw.(bool)
+		}
+		if draft {
+			continue
+		}
+
+		idRaw, err := page.Param("devtoId")
 		if err != nil || idRaw == nil {
-			logutil.Debugf("⚠️  the page %s does not have the field 'devto' set in the front matter", rootDir+"/content/"+page.Path())
+			if art, ok := articlesTitleMap[page.Title()]; ok {
+				logutil.Errorf("%s missing devtoId field in front matter, might be %s: %s",
+					logutil.Gray(rootDir+"/content/"+page.Path()),
+					logutil.Green(strconv.Itoa(int(art.ID))),
+					logutil.Yel(art.URL.String()),
+				)
+			} else {
+				logutil.Errorf("%s missing devtoId field in front matter and title cannot be found on your devto account",
+					logutil.Gray(rootDir+"/content/"+page.Path()),
+				)
+			}
 			continue
 		}
 		id := idRaw.(int)
 
-		articles, err := client.Articles.ListAllMyArticles(context.Background(), nil)
-		if err != nil {
-			logutil.Errorf("%s: %s: unknown error: %s", logutil.Gray(strconv.Itoa(id)), rootDir+"/content/"+page.Path(), err)
-			continue
-		}
-		articlesMap := make(map[int]*devto.ListedArticle)
-		for i := range articles {
-			art := &articles[i]
-			articlesMap[int(art.ID)] = art
-		}
-
-		article, found := articlesMap[id]
+		article, found := articlesIdMap[id]
 		if !found {
-			logutil.Errorf("%s is not a known devto article id: %s", logutil.Gray(strconv.Itoa(id)), rootDir+"/content/"+page.Path())
+			if art, ok := articlesTitleMap[page.Title()]; ok {
+				logutil.Errorf("%s: devtoId %s is unknown but title matches devtoId %s: %s",
+					logutil.Gray(rootDir+"/content/"+page.Path()),
+					logutil.Red(strconv.Itoa(id)),
+					logutil.Green(strconv.Itoa(int(art.ID))),
+					logutil.Yel(art.URL.String()),
+				)
+			} else {
+				logutil.Errorf("%s: devtoId %s is unknown and title cannot be found in your devto account",
+					logutil.Gray(rootDir+"/content/"+page.Path()),
+					logutil.Red(strconv.Itoa(id)),
+				)
+			}
 			continue
 		}
 
 		if article.Title != page.Title() {
-			logutil.Errorf("titles do not match in %s:\ndevto: %s\nhugo:  %s", rootDir+"/content/"+page.Path(), article.Title, page.Title())
+			logutil.Errorf("titles do not match in %s:\ndevto: %s\nhugo:  %s",
+				rootDir+"/content/"+page.Path(),
+				article.Title,
+				page.Title(),
+			)
 			continue
 		}
 
-		// img := ""
-		// var imgs []string
-		// imgsRaw, err := page.Param("images")
-		// if err != nil {
-		// 	imgs = imgsRaw.([]string)
-		// }
-		// if len(imgs) > 0 {
-		// 	img = imgs[0]
-		// }
+		img := ""
+		var imgs []string
 
+		imgsRaw, err := page.Param("images")
+		_, isEmptyArray := imgsRaw.([]interface{})
+		if imgsRaw != nil && !isEmptyArray && err == nil {
+			var ok bool
+			imgs, ok = imgsRaw.([]string)
+			if !ok {
+				logutil.Errorf("%s: field images is expected to be an array of strings, got '%T'",
+					logutil.Gray(rootDir+"/content/"+page.Path()),
+					imgsRaw,
+				)
+				continue
+			}
+		}
+		if len(imgs) > 0 {
+			img = sites.AbsURL(imgs[0], false)
+		}
+		logutil.Debugf("image url: %s", img)
+
+		published := false
+		publishedRaw, err := page.Param("devtoPublished")
+		if publishedRaw == nil {
+			logutil.Errorf("%s: missing devtoPublished field",
+				logutil.Gray(rootDir+"/content/"+page.Path()),
+			)
+			continue
+		}
+
+		if err == nil {
+			var ok bool
+			published, ok = publishedRaw.(bool)
+			if !ok {
+				logutil.Errorf("%s: field devtoPublished is expected to be a boolean, got '%T'",
+					logutil.Gray(rootDir+"/content/"+page.Path()),
+					publishedRaw,
+				)
+				continue
+			}
+		}
+
+		content := heredoc.Docf(`
+			---
+			title: "%s"
+			description: "%s"
+			published: %t
+			tags: "%s"
+			date: %s
+			series: "%s"
+			canonical_url: "%s"
+			cover_image: "%s"
+			---
+			`,
+			page.Title(),
+			page.Description(),
+			published,
+			strings.Join(page.Keywords(), ", "),
+			page.Date().UTC().Format("20060102T15:04Z"),
+			strings.Join([]string{}, ", "),
+			page.Permalink(),
+			img,
+		)
+
+		content += page.RawContent()
 		art, err := UpdateArticle(httpClient, id, Article{
-			Title:        page.Title(),
-			BodyMarkdown: page.RawContent(),
-			// Description:  page.Description(),
-			Published: page.Draft(),
-			// MainImage:    img,
-			// BodyMarkdown: page.RawContent(),
-			// CanonicalURL: page.Permalink(),
-			// Tags:         page.Keywords(),
+			BodyMarkdown: content,
 		})
 		if err != nil {
-			logutil.Errorf("updating %s with the content in %s: %s", logutil.Gray(strconv.Itoa(id)), rootDir+"/content/"+page.Path(), err)
+			logutil.Errorf("%s: updating devto id %s: %s",
+				logutil.Gray(rootDir+"/content/"+page.Path()),
+				logutil.Yel(strconv.Itoa(id)),
+				err,
+			)
 			continue
 		}
 
-		fmt.Printf("%s %s %s updated: %s\n",
-			logutil.Gray(strconv.Itoa(int(article.ID))),
-			logutil.Bold(rootDir+"/content/"+page.Path()),
-			article.Title,
-			logutil.Yel(art.URL.String()),
+		artURL := art.URL.String()
+		if !published {
+			artURL += "/edit"
+		}
+		fmt.Printf("%s: %s pushed to %s (devtoId: %d, devtoPublished: %t)\n",
+			logutil.Green("success"),
+			logutil.Gray(rootDir+"/content/"+page.Path()),
+			logutil.Yel(artURL),
+			art.ID,
+			published,
 		)
 	}
 	return nil
@@ -170,15 +271,28 @@ func PrintDevtoArticles(apiKey string) error {
 		return fmt.Errorf("devto client: %w", err)
 	}
 
-	articles, err := client.Articles.ListAllMyArticles(context.Background(), nil)
+	articles, err := client.Articles.ListMyUnpublishedArticles(context.Background(), &devto.MyArticlesOptions{})
 	for _, article := range articles {
-		fmt.Printf("%s %s\n",
+		fmt.Printf("%s %s %s\n",
 			logutil.Gray(strconv.Itoa(int(article.ID))),
+			logutil.Red(article.URL.String()+"/edit"),
 			article.Title,
 		)
 	}
 	if err != nil {
-		return fmt.Errorf("listing all your articles on dev.to: %w", err)
+		return fmt.Errorf("listing all unpublished articles on dev.to: %w", err)
+	}
+
+	articles, err = client.Articles.ListMyPublishedArticles(context.Background(), &devto.MyArticlesOptions{})
+	for _, article := range articles {
+		fmt.Printf("%s %s %s\n",
+			logutil.Gray(strconv.Itoa(int(article.ID))),
+			logutil.Green(article.URL.String()),
+			article.Title,
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("listing all published articles on dev.to: %w", err)
 	}
 
 	return nil
@@ -240,6 +354,9 @@ func (rt transport) RoundTrip(r *http.Request) (*http.Response, error) {
 func UpdateArticle(client *http.Client, articleID int, article Article) (devto.Article, error) {
 	articleReq := ArticleReq{Article: article}
 	raw, err := json.Marshal(&articleReq)
+	if err != nil {
+		panic("unexpected: " + err.Error())
+	}
 	reader := bytes.NewReader(raw)
 
 	path := fmt.Sprintf("/api/articles/%d", articleID)
@@ -260,8 +377,10 @@ func UpdateArticle(client *http.Client, articleID int, article Article) (devto.A
 	}
 
 	switch httpResp.StatusCode {
-	case 400, 401, 403, 422, 429, 500:
-		err = bytesToError(bytes)
+	case 429:
+		time.Sleep(1 * time.Second)
+	case 400, 401, 403, 422, 500:
+		err = bytesToError(httpResp.StatusCode, bytes)
 		return devto.Article{}, err
 	case 200:
 		// continue below
@@ -283,12 +402,7 @@ type ArticleReq struct {
 }
 
 type Article struct {
-	Title        string   `json:"title"`
-	Published    bool     `json:"published"`
-	BodyMarkdown string   `json:"body_markdown"`
-	Tags         []string `json:"tags"`
-	Series       string   `json:"series"`
-	CanonicalURL string   `json:"canonical_url"`
+	BodyMarkdown string `json:"body_markdown"`
 }
 
 type DevtoError struct {
@@ -298,10 +412,10 @@ type DevtoError struct {
 
 func (e DevtoError) Error() string { return e.Err }
 
-func bytesToError(bytes []byte) error {
+func bytesToError(status int, bytes []byte) error {
 	var errResp DevtoError
 	if err := json.Unmarshal(bytes, &errResp); err != nil {
-		return fmt.Errorf("(raw body) %s", string(bytes))
+		return fmt.Errorf("%d: (raw body) %s", status, string(bytes))
 	}
 
 	return errResp

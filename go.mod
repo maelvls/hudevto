@@ -3,6 +3,7 @@ module github.com/maelvls/hudevto
 go 1.15
 
 require (
+	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/VictorAvelar/devto-api-go v1.0.0
 	github.com/gohugoio/hugo v0.79.0
 	github.com/google/go-cmp v0.5.4 // indirect
