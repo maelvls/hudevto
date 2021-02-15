@@ -22,6 +22,7 @@ import (
 	"github.com/gohugoio/hugo/deps"
 	"github.com/gohugoio/hugo/hugofs"
 	"github.com/gohugoio/hugo/hugolib"
+	"github.com/gohugoio/hugo/resources/page"
 	"github.com/sethgrid/gencurl"
 	"github.com/spf13/jwalterweatherman"
 	"github.com/spf13/viper"
@@ -30,9 +31,10 @@ import (
 )
 
 var (
-	rootDir = flag.String("root", "", "Root directory of the Hugo project.")
-	apiKey  = flag.String("apikey", os.Getenv("DEVTO_APIKEY"), "The API key for Dev.to.")
-	debug   = flag.Bool("debug", false, "Print debug information.")
+	rootDir      = flag.String("root", "", "Root directory of the Hugo project.")
+	apiKey       = flag.String("apikey", os.Getenv("DEVTO_APIKEY"), "The API key for Dev.to.")
+	debug        = flag.Bool("debug", false, "Print debug information.")
+	showMarkdown = flag.Bool("markdown", false, "Show the markdown of the given article.")
 )
 
 func main() {
@@ -45,7 +47,7 @@ func main() {
 
 	switch flag.Arg(0) {
 	case "push":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), *apiKey)
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), *showMarkdown, *apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
@@ -62,7 +64,7 @@ func main() {
 }
 
 // Updates all articles if pathToArticle is left empty.
-func PushArticlesFromHugoToDevto(rootDir, pathToArticle, apiKey string) error {
+func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown bool, apiKey string) error {
 	conf, err := loadHugoConfig(rootDir)
 	if err != nil {
 		return err
@@ -96,15 +98,11 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle, apiKey string) error {
 		return fmt.Errorf("devto client: %w", err)
 	}
 
-	articles, err := client.Articles.ListMyUnpublishedArticles(context.Background(), nil)
+	articles, err := listAllMyArticles(client)
 	if err != nil {
-		return fmt.Errorf("fetching unpublished articles: %s", err)
+		return fmt.Errorf("listing all the user's articles: %w", err)
 	}
-	articlesPub, err := client.Articles.ListMyPublishedArticles(context.Background(), nil)
-	if err != nil {
-		return fmt.Errorf("fetching published articles: %s", err)
-	}
-	articles = append(articles, articlesPub...)
+
 	articlesIdMap := make(map[int]*devto.ListedArticle)
 	articlesTitleMap := make(map[string]*devto.ListedArticle)
 	for i := range articles {
@@ -113,11 +111,21 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle, apiKey string) error {
 		articlesTitleMap[art.Title] = art
 	}
 
+	pages := sites.Pages()
 	if pathToArticle != "" {
-		sites.GetContentPage(pathToArticle)
+		path := sites.AbsPathify(pathToArticle)
+		if path == "" {
+			return fmt.Errorf("%s not found", logutil.Gray(pathToArticle))
+		}
+		p := sites.GetContentPage(path)
+		if p == nil {
+			return fmt.Errorf("%s was found but does not seem to be a page", logutil.Gray(pathToArticle))
+		}
+
+		pages = []page.Page{p}
 	}
 
-	for _, page := range sites.Pages() {
+	for _, page := range pages {
 		if page.Kind() != "page" {
 			continue
 		}
@@ -240,6 +248,10 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle, apiKey string) error {
 
 		content += convertHugoToLiquid(page.RawContent())
 
+		if showMarkdown {
+			fmt.Print(content)
+		}
+
 	Update:
 		art, err := UpdateArticle(httpClient, id, Article{BodyMarkdown: content})
 		switch {
@@ -273,6 +285,22 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle, apiKey string) error {
 	return nil
 }
 
+// Returns all the user's unpublished articles and then the published
+// articles.
+func listAllMyArticles(client *devto.Client) ([]devto.ListedArticle, error) {
+	// The max. number of items per page is 1000, see:
+	// https://docs.forem.com/api/#tag/articles.
+	articlesUnpublished, err := client.Articles.ListMyUnpublishedArticles(context.Background(), &devto.MyArticlesOptions{PerPage: 1000})
+	if err != nil {
+		return nil, fmt.Errorf("fetching unpublished articles: %s", err)
+	}
+	articlesPublished, err := client.Articles.ListMyPublishedArticles(context.Background(), &devto.MyArticlesOptions{PerPage: 1000})
+	if err != nil {
+		return nil, fmt.Errorf("fetching published articles: %s", err)
+	}
+	return append(articlesUnpublished, articlesPublished...), nil
+}
+
 func PrintDevtoArticles(apiKey string) error {
 	httpClient := http.DefaultClient
 	httpClient.Transport = curlDebug(http.DefaultTransport, logutil.EnableDebug, apiKey)
@@ -283,28 +311,22 @@ func PrintDevtoArticles(apiKey string) error {
 		return fmt.Errorf("devto client: %w", err)
 	}
 
-	articles, err := client.Articles.ListMyUnpublishedArticles(context.Background(), &devto.MyArticlesOptions{})
+	articles, err := listAllMyArticles(client)
 	for _, article := range articles {
-		fmt.Printf("%s %s %s\n",
-			logutil.Gray(strconv.Itoa(int(article.ID))),
-			logutil.Red(article.URL.String()+"/edit"),
-			article.Title,
-		)
-	}
-	if err != nil {
-		return fmt.Errorf("listing all unpublished articles on dev.to: %w", err)
-	}
 
-	articles, err = client.Articles.ListMyPublishedArticles(context.Background(), &devto.MyArticlesOptions{})
-	for _, article := range articles {
-		fmt.Printf("%s %s %s\n",
+		publishedStr := logutil.Red("unpublished")
+		if article.Published {
+			publishedStr = logutil.Green("published")
+		}
+		fmt.Printf("%s: %s at %s (%s)\n",
 			logutil.Gray(strconv.Itoa(int(article.ID))),
-			logutil.Green(article.URL.String()),
+			publishedStr,
+			logutil.Yel(addEditSegment(article.URL.String(), article.Published)),
 			article.Title,
 		)
 	}
 	if err != nil {
-		return fmt.Errorf("listing all published articles on dev.to: %w", err)
+		return fmt.Errorf("listing user's articles on dev.to: %w", err)
 	}
 
 	return nil
@@ -463,3 +485,7 @@ var hugoTag = regexp.MustCompile("{{< ([a-z]+) (.*) >}}")
 func convertHugoToLiquid(in string) string {
 	return hugoTag.ReplaceAllString(in, "{% $1 $2 %}")
 }
+
+// client.Articles.ListAllMyArticles was not actually listing all articles
+// and would only show the unpublished ones. Also, it would only show the
+// first 20.
