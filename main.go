@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -44,7 +45,7 @@ func main() {
 
 	switch flag.Arg(0) {
 	case "push":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), *apiKey)
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), *apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
@@ -60,7 +61,8 @@ func main() {
 	}
 }
 
-func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
+// Updates all articles if pathToArticle is left empty.
+func PushArticlesFromHugoToDevto(rootDir, pathToArticle, apiKey string) error {
 	conf, err := loadHugoConfig(rootDir)
 	if err != nil {
 		return err
@@ -111,10 +113,16 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 		articlesTitleMap[art.Title] = art
 	}
 
+	if pathToArticle != "" {
+		sites.GetContentPage(pathToArticle)
+	}
+
 	for _, page := range sites.Pages() {
 		if page.Kind() != "page" {
 			continue
 		}
+
+		pathToMD := rootDir + "/content/" + page.Path()
 
 		draft := true
 		draftRaw, err := page.Param("draft")
@@ -129,7 +137,7 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 		publishedRaw, err := page.Param("devtoPublished")
 		if publishedRaw == nil {
 			logutil.Errorf("%s: missing devtoPublished field",
-				logutil.Gray(rootDir+"/content/"+page.Path()),
+				logutil.Gray(pathToMD),
 			)
 			continue
 		}
@@ -138,7 +146,7 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 			published, ok = publishedRaw.(bool)
 			if !ok {
 				logutil.Errorf("%s: field devtoPublished is expected to be a boolean, got '%T'",
-					logutil.Gray(rootDir+"/content/"+page.Path()),
+					logutil.Gray(pathToMD),
 					publishedRaw,
 				)
 				continue
@@ -149,13 +157,13 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 		if err != nil || idRaw == nil {
 			if art, ok := articlesTitleMap[page.Title()]; ok {
 				logutil.Errorf("%s missing devtoId field in front matter, might be %s: %s",
-					logutil.Gray(rootDir+"/content/"+page.Path()),
+					logutil.Gray(pathToMD),
 					logutil.Green(strconv.Itoa(int(art.ID))),
 					logutil.Yel(addEditSegment(art.URL.String(), published)),
 				)
 			} else {
 				logutil.Errorf("%s missing devtoId field in front matter and title cannot be found on your devto account",
-					logutil.Gray(rootDir+"/content/"+page.Path()),
+					logutil.Gray(pathToMD),
 				)
 			}
 			continue
@@ -166,14 +174,14 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 		if !found {
 			if art, ok := articlesTitleMap[page.Title()]; ok {
 				logutil.Errorf("%s: devtoId %s is unknown but title matches devtoId %s: %s",
-					logutil.Gray(rootDir+"/content/"+page.Path()),
+					logutil.Gray(pathToMD),
 					logutil.Red(strconv.Itoa(id)),
 					logutil.Green(strconv.Itoa(int(art.ID))),
 					logutil.Yel(addEditSegment(art.URL.String(), published)),
 				)
 			} else {
 				logutil.Errorf("%s: devtoId %s is unknown and title cannot be found in your devto account",
-					logutil.Gray(rootDir+"/content/"+page.Path()),
+					logutil.Gray(pathToMD),
 					logutil.Red(strconv.Itoa(id)),
 				)
 			}
@@ -182,7 +190,7 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 
 		if article.Title != page.Title() {
 			logutil.Errorf("titles do not match in %s:\ndevto: %s\nhugo:  %s",
-				rootDir+"/content/"+page.Path(),
+				pathToMD,
 				article.Title,
 				page.Title(),
 			)
@@ -198,7 +206,7 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 			imgs, ok = imgsRaw.([]string)
 			if !ok {
 				logutil.Errorf("%s: field images is expected to be an array of strings, got '%T'",
-					logutil.Gray(rootDir+"/content/"+page.Path()),
+					logutil.Gray(pathToMD),
 					imgsRaw,
 				)
 				continue
@@ -230,7 +238,7 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 			img,
 		)
 
-		content += page.RawContent()
+		content += convertHugoToLiquid(page.RawContent())
 
 	Update:
 		art, err := UpdateArticle(httpClient, id, Article{BodyMarkdown: content})
@@ -242,16 +250,21 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 			goto Update
 		case err != nil:
 			logutil.Errorf("%s: updating devto id %s: %s",
-				logutil.Gray(rootDir+"/content/"+page.Path()),
+				logutil.Gray(pathToMD),
 				logutil.Yel(strconv.Itoa(id)),
 				err,
 			)
 			continue
 		}
 
-		fmt.Printf("%s: %s pushed to %s (devtoId: %d, devtoPublished: %t)\n",
+		publishedStr := logutil.Red("unpublished")
+		if published {
+			publishedStr = logutil.Green("published")
+		}
+		fmt.Printf("%s: %s pushed %s to %s (devtoId: %d, devtoPublished: %t)\n",
 			logutil.Green("success"),
-			logutil.Gray(rootDir+"/content/"+page.Path()),
+			logutil.Gray(pathToMD),
+			publishedStr,
 			logutil.Yel(addEditSegment(art.URL.String(), published)),
 			art.ID,
 			published,
@@ -434,4 +447,19 @@ func addEditSegment(articleURL string, published bool) string {
 		articleURL += "/edit"
 	}
 	return articleURL
+}
+
+var hugoTag = regexp.MustCompile("{{< ([a-z]+) (.*) >}}")
+
+// Hugo tag:
+//
+//   {{< youtube 30a0WrfaS2A >}}
+//
+// Devto liquid:
+//
+//   {% youtube 30a0WrfaS2A %}
+//
+// Ref: https://docs.dev.to/frontend/liquid-tags
+func convertHugoToLiquid(in string) string {
+	return hugoTag.ReplaceAllString(in, "{% $1 $2 %}")
 }
