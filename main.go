@@ -125,13 +125,33 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 			continue
 		}
 
+		published := false
+		publishedRaw, err := page.Param("devtoPublished")
+		if publishedRaw == nil {
+			logutil.Errorf("%s: missing devtoPublished field",
+				logutil.Gray(rootDir+"/content/"+page.Path()),
+			)
+			continue
+		}
+		if err == nil {
+			var ok bool
+			published, ok = publishedRaw.(bool)
+			if !ok {
+				logutil.Errorf("%s: field devtoPublished is expected to be a boolean, got '%T'",
+					logutil.Gray(rootDir+"/content/"+page.Path()),
+					publishedRaw,
+				)
+				continue
+			}
+		}
+
 		idRaw, err := page.Param("devtoId")
 		if err != nil || idRaw == nil {
 			if art, ok := articlesTitleMap[page.Title()]; ok {
 				logutil.Errorf("%s missing devtoId field in front matter, might be %s: %s",
 					logutil.Gray(rootDir+"/content/"+page.Path()),
 					logutil.Green(strconv.Itoa(int(art.ID))),
-					logutil.Yel(art.URL.String()),
+					logutil.Yel(addEditSegment(art.URL.String(), published)),
 				)
 			} else {
 				logutil.Errorf("%s missing devtoId field in front matter and title cannot be found on your devto account",
@@ -149,7 +169,7 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 					logutil.Gray(rootDir+"/content/"+page.Path()),
 					logutil.Red(strconv.Itoa(id)),
 					logutil.Green(strconv.Itoa(int(art.ID))),
-					logutil.Yel(art.URL.String()),
+					logutil.Yel(addEditSegment(art.URL.String(), published)),
 				)
 			} else {
 				logutil.Errorf("%s: devtoId %s is unknown and title cannot be found in your devto account",
@@ -171,7 +191,6 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 
 		img := ""
 		var imgs []string
-
 		imgsRaw, err := page.Param("images")
 		_, isEmptyArray := imgsRaw.([]interface{})
 		if imgsRaw != nil && !isEmptyArray && err == nil {
@@ -187,28 +206,6 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 		}
 		if len(imgs) > 0 {
 			img = sites.AbsURL(imgs[0], false)
-		}
-		logutil.Debugf("image url: %s", img)
-
-		published := false
-		publishedRaw, err := page.Param("devtoPublished")
-		if publishedRaw == nil {
-			logutil.Errorf("%s: missing devtoPublished field",
-				logutil.Gray(rootDir+"/content/"+page.Path()),
-			)
-			continue
-		}
-
-		if err == nil {
-			var ok bool
-			published, ok = publishedRaw.(bool)
-			if !ok {
-				logutil.Errorf("%s: field devtoPublished is expected to be a boolean, got '%T'",
-					logutil.Gray(rootDir+"/content/"+page.Path()),
-					publishedRaw,
-				)
-				continue
-			}
 		}
 
 		content := heredoc.Docf(`
@@ -234,10 +231,16 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 		)
 
 		content += page.RawContent()
-		art, err := UpdateArticle(httpClient, id, Article{
-			BodyMarkdown: content,
-		})
-		if err != nil {
+
+	Update:
+		art, err := UpdateArticle(httpClient, id, Article{BodyMarkdown: content})
+		switch {
+		case isTooManyRequests(err):
+			// As per https://docs.forem.com/api/#operation/updateArticle,
+			// there is a limit of 30 requests per 30 seconds.
+			time.Sleep(1 * time.Second)
+			goto Update
+		case err != nil:
 			logutil.Errorf("%s: updating devto id %s: %s",
 				logutil.Gray(rootDir+"/content/"+page.Path()),
 				logutil.Yel(strconv.Itoa(id)),
@@ -246,14 +249,10 @@ func PushArticlesFromHugoToDevto(rootDir, apiKey string) error {
 			continue
 		}
 
-		artURL := art.URL.String()
-		if !published {
-			artURL += "/edit"
-		}
 		fmt.Printf("%s: %s pushed to %s (devtoId: %d, devtoPublished: %t)\n",
 			logutil.Green("success"),
 			logutil.Gray(rootDir+"/content/"+page.Path()),
-			logutil.Yel(artURL),
+			logutil.Yel(addEditSegment(art.URL.String(), published)),
 			art.ID,
 			published,
 		)
@@ -377,15 +376,11 @@ func UpdateArticle(client *http.Client, articleID int, article Article) (devto.A
 	}
 
 	switch httpResp.StatusCode {
-	case 429:
-		time.Sleep(1 * time.Second)
-	case 400, 401, 403, 422, 500:
-		err = bytesToError(httpResp.StatusCode, bytes)
-		return devto.Article{}, err
 	case 200:
 		// continue below
 	default:
-		return devto.Article{}, fmt.Errorf("unxpected HTTP status code %d for GET %s: %s", httpResp.StatusCode, path, bytes)
+		err = parseDevtoError(httpResp.StatusCode, bytes)
+		return devto.Article{}, err
 	}
 
 	var art devto.Article
@@ -412,11 +407,31 @@ type DevtoError struct {
 
 func (e DevtoError) Error() string { return e.Err }
 
-func bytesToError(status int, bytes []byte) error {
+func parseDevtoError(status int, bytes []byte) error {
 	var errResp DevtoError
 	if err := json.Unmarshal(bytes, &errResp); err != nil {
-		return fmt.Errorf("%d: (raw body) %s", status, string(bytes))
+		return DevtoError{Status: status, Err: strings.TrimSpace(string(bytes))}
 	}
 
 	return errResp
+}
+
+func isTooManyRequests(err error) bool {
+	if err == nil {
+		return false
+	}
+	devtoErr, ok := err.(DevtoError)
+	if !ok {
+		return false
+	}
+	return devtoErr.Status == 429
+}
+
+// We want to have "/edit" at the end of URLs that are not yet published
+// since these cannot be accessed without "/edit".
+func addEditSegment(articleURL string, published bool) string {
+	if !published {
+		articleURL += "/edit"
+	}
+	return articleURL
 }
