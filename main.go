@@ -31,34 +31,38 @@ import (
 )
 
 var (
-	rootDir = flag.String("root", "", "Root directory of the Hugo project.")
-	apiKey  = flag.String("apikey", os.Getenv("DEVTO_APIKEY"), "The API key for Dev.to.")
-	debug   = flag.Bool("debug", false, "Print debug information.")
+	rootDir    = flag.String("root", "", "Root directory of the Hugo project.")
+	apiKeyFlag = flag.String("apikey", "", "The API key for Dev.to. You can also set DEVTO_APIKEY instead.")
+	debug      = flag.Bool("debug", false, "Print debug information such as the HTTP requests that are being made in curl format.")
 )
 
 func main() {
 	flag.Parse()
 	logutil.EnableDebug = *debug
 
-	if *apiKey == "" {
+	apiKey := os.Getenv("DEVTO_APIKEY")
+	if *apiKeyFlag != "" {
+		apiKey = *apiKeyFlag
+	}
+	if apiKey == "" {
 		logutil.Errorf("no API key given, either give it with --apikey or with DEVTO_APIKEY")
 	}
 
 	switch flag.Arg(0) {
 	case "push":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), false, *apiKey)
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), false, apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
 		}
 	case "preview":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), true, *apiKey)
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), true, apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
 		}
 	case "list":
-		err := PrintDevtoArticles(*apiKey)
+		err := PrintDevtoArticles(apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
