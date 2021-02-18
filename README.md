@@ -2,6 +2,17 @@
 
 ![Screenshot of the hudevto push command](https://user-images.githubusercontent.com/2195781/108324642-737e7f80-71c8-11eb-9e4f-8f23fd14d644.png)
 
+**Content:**
+
+- [Install](#install)
+- [Usage](#usage)
+- [Use it](#use-it)
+  - [List your dev.to articles](#list-your-devto-articles)
+  - [Preview the Markdown content that will be pushed to dev.to](#preview-the-markdown-content-that-will-be-pushed-to-devto)
+  - [Push one blog post to dev.to](#push-one-blog-post-to-devto)
+  - [Push all blog posts to dev.to](#push-all-blog-posts-to-devto)
+- [Notes](#notes)
+
 ## Install
 
 ```sh
@@ -34,9 +45,10 @@ First, copy your dev.to token from your dev.to settings and set it as an environ
 export DEVTO_APIKEY=$(lpass show dev.to -p)
 ```
 
-**List your dev.to posts**. This is useful because I have dev.to configured with
-the RSS feed of my blog so that dev.to automatically creates a draft of each
-of my new posts.
+### List your dev.to articles
+
+This is useful because I have dev.to configured with the RSS feed of my
+blog so that dev.to automatically creates a draft of each of my new posts.
 
 ```sh
 % hudevto list
@@ -49,7 +61,34 @@ of my new posts.
 317339: published at https://dev.to/maelvls/learning-kubernetes-controllers-496j (Learning Kubernetes Controllers)
 ```
 
-**Preview the Markdown content that will be pushed to dev.to**.
+### Preview the Markdown content that will be pushed to dev.to
+
+I use the `hudevto preview` command because I do some transformations and I need a way to preview the changes to make sure the Markdown and front matter make sense. The transformations are:
+
+- Generate a new front matter which is used by dev.to for setting the dev.to post title and canonical URL;
+- Change the Hugo "tags" into Liquid tags, such as:
+
+  ```md
+  {{< youtube 30a0WrfaS2A >}}
+  ```
+
+  is changed to the Liquid tag:
+
+  ```md
+  {% youtube 30a0WrfaS2A %}
+  ```
+
+- Add the base URL of the post to the markdown images so that images are not broken. ONLY WORKS if your images are stored along side your blog post, such as:
+
+  ```sh
+  % ls --tree ./content/2020/avoid-gke-lb-using-hostport
+  ./content/2020/avoid-gke-lb-using-hostport
+  ├── cost-load-balancer-gke.png
+  ├── cover-external-dns.png
+  ├── how-service-controller-works-on-gke.png
+  ├── index.md                                             # The actual blog post.
+  └── packet-routing-with-akrobateo.png
+  ```
 
 ```sh
 % hudevto preview ./content/2020/avoid-gke-lb-using-hostport/index.md
@@ -73,38 +112,24 @@ cover_image: "https://maelvls.dev/avoid-gke-lb-with-hostport/cover-external-dns.
 In my spare time, I maintain a tiny "playground" Kubernetes cluster on [GKE](https://cloud.google.com/kubernetes-engine) (helm charts [here](https://github.com/maelvls/k.maelvls.dev)). I quickly realized that realized using `Service type=LoadBalancer` in GKE was spawning a _[Network Load Balancer](https://cloud.google.com/load-balancing/docs/network)_ which costs approximately **\$15 per month**! In this post, I present a way of avoiding the expensive Google Network Load Balancer by load balancing in-cluster using akrobateo, which acts as a Service type=LoadBalancer controller.
 ```
 
-I use the `preview` command because I do some transformations and I need a way to preview the changes to make sure the Markdown and front matter make sense. The transformations are:
-
-- Generate a new front matter which is used by dev.to for setting the dev.to post title and canonical URL;
-- Change the Hugo "tags" into Liquid tags, such as:
-  ```md
-  {{< youtube 30a0WrfaS2A >}}
-  ```
-  is changed to the Liquid tag:
-  ```md
-  {% youtube 30a0WrfaS2A %}
-  ```
-- Gdd the base URL of the post to the markdown images so that images are not broken. ONLY WORKS if your images are stored along side your blog post, such as:
-  ```sh
-  % ls --tree ./content/2020/avoid-gke-lb-using-hostport
-  ./content/2020/avoid-gke-lb-using-hostport
-  ├── cost-load-balancer-gke.png
-  ├── cover-external-dns.png
-  ├── how-service-controller-works-on-gke.png
-  ├── index.md                                             # The actual blog post.
-  └── packet-routing-with-akrobateo.png
-  ```
-
-**Push one blog post to dev.to**
+### Push one blog post to dev.to
 
 ```sh
 % hudevto push ./content/2020/avoid-gke-lb-using-hostport/index.md
 success: ./content/2020/avoid-gke-lb-using-hostport/index.md pushed published to https://dev.to/maelvls/avoid-gke-s-expensive-load-balancer-by-using-hostport-2ab9 (devtoId: 241275, devtoPublished: true)
 ```
 
-**Push all blog posts to dev.to**
+### Push all blog posts to dev.to
 
 ```sh
+% hudevto push
+success: ./content/notes/dns.md pushed unpublished to https://dev.to/maelvls/it-s-always-the-dns-fault-3lg3-temp-slug-8953915/edit (devtoId: 410260, devtoPublished: false)
+success: ./content/2020/deployment-available-condition/index.md pushed published to https://dev.to/maelvls/understanding-the-available-condition-of-a-kubernetes-deployment-51li (devtoId: 386691, devtoPublished: true)
+success: ./content/2020/docker-proxy-registry-kind/index.md pushed published to https://dev.to/maelvls/pull-through-docker-registry-on-kind-clusters-cpo (devtoId: 410837, devtoPublished: true)
+success: ./content/2020/mitmproxy-kubectl/index.md pushed published to https://dev.to/maelvls/using-mitmproxy-to-understand-what-kubectl-does-under-the-hood-36om (devtoId: 377876, devtoPublished: true)
+success: ./content/2020/static-libraries-and-autoconf-hell/index.md pushed published to https://dev.to/maelvls/epic-journey-with-statically-and-dynamically-linked-libraries-a-so-1khn (devtoId: 365849, devtoPublished: true)
+success: ./content/2020/gh-actions-with-tf-private-repo/index.md pushed published to https://dev.to/maelvls/github-actions-with-a-private-terraform-module-5b85 (devtoId: 331169, devtoPublished: true)
+...
 ```
 
 ## Notes
