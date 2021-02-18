@@ -145,7 +145,7 @@ Often means that there is a duplicate article.
 **Validation failed: (<unknown>): could not find expected ':' while scanning a simple key at line 4 column 1**: you can use the command
 
 ```sh
-hudevto push --markdown ./content/2020/gh-actions-with-tf-private-repo/index.md
+hudevto preview ./content/2020/gh-actions-with-tf-private-repo/index.md
 ```
 
 to see what is being uploaded to dev.to. I often got this error when trying
