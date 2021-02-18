@@ -31,10 +31,9 @@ import (
 )
 
 var (
-	rootDir      = flag.String("root", "", "Root directory of the Hugo project.")
-	apiKey       = flag.String("apikey", os.Getenv("DEVTO_APIKEY"), "The API key for Dev.to.")
-	debug        = flag.Bool("debug", false, "Print debug information.")
-	showMarkdown = flag.Bool("markdown", false, "Show the markdown of the given article.")
+	rootDir = flag.String("root", "", "Root directory of the Hugo project.")
+	apiKey  = flag.String("apikey", os.Getenv("DEVTO_APIKEY"), "The API key for Dev.to.")
+	debug   = flag.Bool("debug", false, "Print debug information.")
 )
 
 func main() {
@@ -47,7 +46,13 @@ func main() {
 
 	switch flag.Arg(0) {
 	case "push":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), *showMarkdown, *apiKey)
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), false, *apiKey)
+		if err != nil {
+			logutil.Errorf(err.Error())
+			os.Exit(1)
+		}
+	case "preview":
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), true, *apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
@@ -59,7 +64,13 @@ func main() {
 			os.Exit(1)
 		}
 	default:
-		logutil.Errorf("unknown command '%s', try list or push", flag.Arg(0))
+		logutil.Errorf("unknown command '%s'.", flag.Arg(0))
+		fmt.Fprintf(os.Stderr, heredoc.Doc(`
+			Usage:
+			  hudevto preview
+			  hudevto push
+			  hudevto list
+		`))
 	}
 }
 
@@ -176,7 +187,14 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown boo
 			}
 			continue
 		}
-		id := idRaw.(int)
+		id, ok := idRaw.(int)
+		if !ok {
+			logutil.Errorf("%s: field devtoId is expected to be an integer, got '%T'",
+				logutil.Gray(pathToMD),
+				idRaw,
+			)
+			continue
+		}
 
 		article, found := articlesIdMap[id]
 		if !found {
@@ -246,10 +264,15 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown boo
 			img,
 		)
 
-		content += convertHugoToLiquid(page.RawContent())
+		body := page.RawContent()
+		body = convertHugoToLiquid(body)
+		body = addPostURLInImages(body, page.Permalink())
+
+		content += body
 
 		if showMarkdown {
 			fmt.Print(content)
+			return nil
 		}
 
 	Update:
@@ -471,6 +494,10 @@ func addEditSegment(articleURL string, published bool) string {
 	return articleURL
 }
 
+// client.Articles.ListAllMyArticles was not actually listing all articles
+// and would only show the unpublished ones. Also, it would only show the
+// first 20.
+
 var hugoTag = regexp.MustCompile("{{< ([a-z]+) (.*) >}}")
 
 // Hugo tag:
@@ -486,6 +513,22 @@ func convertHugoToLiquid(in string) string {
 	return hugoTag.ReplaceAllString(in, "{% $1 $2 %}")
 }
 
-// client.Articles.ListAllMyArticles was not actually listing all articles
-// and would only show the unpublished ones. Also, it would only show the
-// first 20.
+// I want to be able to add the base post URL to each image. For example,
+// imagine that the post is
+//
+//  https://maelvls.dev/you-should-write-comments/index.md
+//
+// then I need to replace the images, such as:
+//
+//  ![My image](cover-you-should-write-comments.png)
+//
+// with:
+//
+//  ![My image](https://maelvls.dev/you-should-write-comments/cover-you-should-write-comments.png)
+//
+// Note: (?s) means multiline, (?U) means non-greedy.
+var mdImg = regexp.MustCompile(`(?sU)\!\[([^\]]*)\]\((\S*)\)`)
+
+func addPostURLInImages(in string, basePostURL string) string {
+	return mdImg.ReplaceAllString(in, "![$1]("+basePostURL+"$2)")
+}
