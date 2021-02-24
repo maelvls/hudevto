@@ -12,6 +12,8 @@
   - [Push one blog post to dev.to](#push-one-blog-post-to-devto)
   - [Push all blog posts to dev.to](#push-all-blog-posts-to-devto)
 - [Notes](#notes)
+  - [Hugo's hard breaks versus dev.to hard breaks](#hugos-hard-breaks-versus-devto-hard-breaks)
+  - [Known errors](#known-errors)
 
 ## Install
 
@@ -90,6 +92,11 @@ I use the `hudevto preview` command because I do some transformations and I need
   └── packet-routing-with-akrobateo.png
   ```
 
+**Note:** that Hugo uses soft breaks for new lines as per the CommonMark
+spec, but dev.to uses the "Markdown Here" conventions which use a hard
+break on new lines; to work around that, see the below
+[section](#hugos-hard-breaks-versus-devto-hard-breaks).
+
 ```sh
 % hudevto preview ./content/2020/avoid-gke-lb-using-hostport/index.md
 ---
@@ -133,6 +140,27 @@ success: ./content/2020/gh-actions-with-tf-private-repo/index.md pushed publishe
 ```
 
 ## Notes
+
+### Hugo's hard breaks versus dev.to hard breaks
+
+One major difference between Hugo and dev.to markdown is that Hugo uses
+soft breaks whenever it parses a new lines (as per the CommonMark spec); on
+the other side, dev.to uses the "Markdown Here" conventions where a hard
+break is used when a new line is parsed.
+
+I was not able to find a way to do the transformation in `hudevto` itself.
+What I currently do is to keep my hugo blog source with lines "unwrapped"
+since I used to wrap my markdown files at 80 characters.
+
+To "unwrap" all your markdown line from 80 chars to "no width limit", you
+can use `prettier`:
+
+```sh
+npm i -g prettier
+prettier --write --prose-wrap=never content/**/*.md
+```
+
+### Known errors
 
 **Validation failed: Canonical url has already been taken** means that
 another article of yours exists with the same `canonical_url` field in its
