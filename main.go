@@ -50,13 +50,19 @@ func main() {
 
 	switch flag.Arg(0) {
 	case "push":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), false, apiKey)
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), false, false, apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
 		}
 	case "preview":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), true, apiKey)
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), true, false, apiKey)
+		if err != nil {
+			logutil.Errorf(err.Error())
+			os.Exit(1)
+		}
+	case "diff":
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), false, true, apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
@@ -79,7 +85,7 @@ func main() {
 }
 
 // Updates all articles if pathToArticle is left empty.
-func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown bool, apiKey string) error {
+func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, showDiff bool, apiKey string) error {
 	conf, err := loadHugoConfig(rootDir)
 	if err != nil {
 		return err
@@ -219,11 +225,20 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown boo
 		}
 
 		if article.Title != page.Title() {
-			logutil.Errorf("titles do not match in %s:\ndevto: %s\nhugo:  %s",
+			logutil.Errorf(heredoc.Docf(`
+				there seems to be a title mismatch in %s.
+				%s dev.to title
+				%s hugo title
+				%s
+				%s
+				To fix the mismatch, go to: %s`,
 				pathToMD,
-				article.Title,
-				page.Title(),
-			)
+				logutil.Cyan("---"),
+				logutil.Cyan("+++"),
+				logutil.Cyan("- ")+logutil.Red(article.Title),
+				logutil.Cyan("+ ")+logutil.Green(page.Title()),
+				logutil.Yel(addEditSegment(article.URL.String(), published)),
+			))
 			continue
 		}
 
@@ -277,6 +292,28 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown boo
 		if showMarkdown {
 			fmt.Print(content)
 			return nil
+		}
+
+		existing, err := GetArticle(httpClient, id)
+		if err != nil {
+			logutil.Errorf("%s: fetching devto id %s: %s",
+				logutil.Gray(pathToMD),
+				logutil.Yel(strconv.Itoa(id)),
+				err,
+			)
+			continue
+		}
+
+		if existing.BodyMarkdown == content {
+			logutil.Infof("%s: no change, skipping",
+				logutil.Gray(pathToMD),
+			)
+			continue
+		}
+
+		if showDiff && existing.BodyMarkdown != content {
+			fmt.Println(FormatDiff(existing.BodyMarkdown, content))
+			continue
 		}
 
 	Update:
@@ -412,23 +449,16 @@ func (rt transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return rt.wrapped.RoundTrip(r)
 }
 
-func UpdateArticle(client *http.Client, articleID int, article Article) (devto.Article, error) {
-	articleReq := ArticleReq{Article: article}
-	raw, err := json.Marshal(&articleReq)
-	if err != nil {
-		panic("unexpected: " + err.Error())
-	}
-	reader := bytes.NewReader(raw)
-
+func GetArticle(client *http.Client, articleID int) (devto.Article, error) {
 	path := fmt.Sprintf("/api/articles/%d", articleID)
-	req, err := http.NewRequest("PUT", "https://dev.to"+path, reader)
+	req, err := http.NewRequest("GET", "https://dev.to"+path, nil)
 	if err != nil {
 		return devto.Article{}, fmt.Errorf("creating HTTP request for GET %s: %w", path, err)
 	}
 
 	httpResp, err := client.Do(req)
 	if err != nil {
-		return devto.Article{}, fmt.Errorf("while doing GET %s: %w", path, err)
+		return devto.Article{}, fmt.Errorf("while doing %s %s: %w", req.Method, path, err)
 	}
 	defer httpResp.Body.Close()
 
@@ -448,7 +478,49 @@ func UpdateArticle(client *http.Client, articleID int, article Article) (devto.A
 	var art devto.Article
 	err = json.Unmarshal(bytes, &art)
 	if err != nil {
-		return devto.Article{}, fmt.Errorf("while parsing JSON from the HTTP response for GET %s: %w", path, err)
+		return devto.Article{}, fmt.Errorf("while parsing JSON from the HTTP response for %s %s: %w", req.Method, path, err)
+	}
+
+	return art, nil
+}
+
+func UpdateArticle(client *http.Client, articleID int, article Article) (devto.Article, error) {
+	articleReq := ArticleReq{Article: article}
+	raw, err := json.Marshal(&articleReq)
+	if err != nil {
+		panic("unexpected: " + err.Error())
+	}
+	reader := bytes.NewReader(raw)
+
+	path := fmt.Sprintf("/api/articles/%d", articleID)
+	req, err := http.NewRequest("PUT", "https://dev.to"+path, reader)
+	if err != nil {
+		return devto.Article{}, fmt.Errorf("creating HTTP request for %s %s: %w", req.Method, path, err)
+	}
+
+	httpResp, err := client.Do(req)
+	if err != nil {
+		return devto.Article{}, fmt.Errorf("while doing %s %s: %w", req.Method, path, err)
+	}
+	defer httpResp.Body.Close()
+
+	bytes, err := ioutil.ReadAll(httpResp.Body)
+	if err != nil {
+		return devto.Article{}, fmt.Errorf("while reading HTTP response for %s: %w", path, err)
+	}
+
+	switch httpResp.StatusCode {
+	case 200:
+		// continue below
+	default:
+		err = parseDevtoError(httpResp.StatusCode, bytes)
+		return devto.Article{}, err
+	}
+
+	var art devto.Article
+	err = json.Unmarshal(bytes, &art)
+	if err != nil {
+		return devto.Article{}, fmt.Errorf("while parsing JSON from the HTTP response for %s %s: %w", req.Method, path, err)
 	}
 
 	return art, nil

@@ -15,6 +15,7 @@ var (
 	Red   = ansi.ColorFunc("red")
 	Bold  = ansi.ColorFunc("white+b")
 	Gray  = ansi.ColorFunc("black+h")
+	Cyan  = ansi.ColorFunc("cyan")
 )
 
 // Prints to stderr.
