@@ -25,23 +25,102 @@
 ## Usage
 
 ```sh
-Usage:
-  hudevto push
-  hudevto push ./content/2020/avoid-gke-lb-using-hostport
-  hudevto preview
-  hudevto preview ./content/2020/avoid-gke-lb-using-hostport
-  hudevto list
+% hudevto help
+hudevto allows you to synchronize your Hugo posts with your DEV articles. The
+synchronization is one way (Hugo to DEV). A Hugo post is only pushed when a
+change is detected. When pushed to DEV, the Hugo article is applied two
+transformations: the relative image links are absolutified, and the Hugo tags
+are turned into Liquid tags.
 
-Options:
-  --apikey STR   The API key for Dev.to. You can also set DEVTO_APIKEY instead.
-  --debug        Print debug information such as the HTTP requests that are being
-                 made in curl format.
-  --root DIR     Root directory of the Hugo project.
+USAGE
+  hudevto [OPTION] (preview|diff) POST
+  hudevto [OPTION] status [POST]
+  hudevto [OPTION] push [POST]
+  hudevto [OPTION] devto list
+
+DESCRIPTION
+In order to operate, hudevto requires you to have your DEV account configured
+with "Publish to DEV Community from your blog's RSS". You can configure that at
+https://dev.to/settings/extensions. DEV will create a draft article for
+every Hugo post that you have published on your blog. For example, Let us
+imagine that your Hugo blog layout is:
+
+    .
+    └── content
+       ├── brick-chest.md
+       ├── cloth-impossible.md
+       └── powder-farmer.md
+
+After configuring the RSS feed of your blog at https://maelvls.dev/index.xml,
+DEV should create one draft article per post. You can check that these articles
+have been created on DEV with:
+
+    % hudevto devto list
+    386001: unpublished at https://dev.to/maelvls/brick-chest/edit
+    386002: unpublished at https://dev.to/maelvls/cloth-impossible/edit
+    386003: unpublished at https://dev.to/maelvls/powder-farmer/edit
+
+The next step is to map each article that you want to sync to DEV. Let us see
+the state of the mapping:
+
+    % hudevto status
+    error: ./content/brick-chest.md: missing devtoId field in front matter, might be 386001: https://dev.to/maelvls/brick-chest/edit
+    error: ./content/cloth-impossible.md: missing devtoId field in front matter, might be 386002: https://dev.to/maelvls/cloth-impossible/edit
+    error: ./content/powder-farmer.md: missing devtoId field in front matter, might be 386003: https://dev.to/maelvls/powder-farmer/edit
+
+At this point, you need to open each of your Hugo post and add some fields to
+their front matters. For example, in ./content/brick-chest.md, we add this:
+
+    devtoId: 386001       # This is the DEV ID as seen in hudevto devto list
+    devtoPublished: true  # When false, the DEV article will stay a draft
+    devtoSkip: false      # When true, hudevto will ignore this post.
+
+The status should have changed:
+
+    % hudevto status
+    info: ./content/brick-chest.md will be pushed published to https://dev.to/maelvls/brick-chest/edit
+    info: ./content/cloth-impossible.md will be pushed published to https://dev.to/maelvls/cloth-impossible/edit
+    info: ./content/powder-farmer.md will be pushed published to https://dev.to/maelvls/powder-farmer/edit
+
+Finally, you can push to DEV:
+
+    % hudevto push
+    success: ./content/brick-chest.md pushed to https://dev.to/maelvls/brick-chest-2588
+    success: ./content/cloth-impossible.md pushed to https://dev.to/maelvls/cloth-impossible-95dc
+    success: ./content/powder-farmer.md pushed to https://dev.to/maelvls/powder-farmer-6a18
+
+
+COMMANDS
+  hudevto status [POST]
+      Shows the status of each post (or of a single post). The status shows
+      whether it is mapped to a DEV article and if a push is required when the
+      Hugo post has changes that are not on DEV yet.
+  hudevto preview POST
+      Displays a Markdown preview of the Hugo post that has been converted into
+      the DEV article Markdown format. You can use this command to check that
+      the tranformations were correctly applied.
+  hudevto diff POST
+      Displays a diff between the Hugo post and the DEV article. It is useful
+      when you want to see what changes will be pushed.
+  hudevto push [POST]
+      Pushes the given Hugo Markdown post to DEV. If no post is given, then
+      all posts are pushed.
+  hudevto devto list
+      Lists all the articles you have on your DEV account.
+
+OPTIONS
+  -apikey string
+    	The API key for Dev.to. You can also set DEVTO_APIKEY instead.
+  -debug
+    	Print debug information such as the HTTP requests that are being made in curl format.
+  -root string
+    	Root directory of the Hugo project.
 ```
 
 ## Use it
 
-First, copy your dev.to token from your dev.to settings and set it as an environment variable:
+First, copy your dev.to token from your dev.to settings and set it as an
+environment variable:
 
 ```sh
 export DEVTO_APIKEY=$(lpass show dev.to -p)
@@ -53,7 +132,7 @@ This is useful because I have dev.to configured with the RSS feed of my
 blog so that dev.to automatically creates a draft of each of my new posts.
 
 ```sh
-% hudevto list
+% hudevto devto list
 410260: unpublished at https://dev.to/maelvls/it-s-always-the-dns-fault-3lg3-temp-slug-8953915/edit (It's always the DNS' fault)
 365847: unpublished at https://dev.to/maelvls/stuff-about-wireshark-28c-temp-slug-8030102/edit (Stuff about Wireshark)
 365846: unpublished at https://dev.to/maelvls/how-client-server-ssh-authentication-works-5e7-temp-slug-7868012/edit (How client-server SSH authentication works)
