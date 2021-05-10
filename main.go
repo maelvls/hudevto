@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -31,6 +32,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/maelvls/hudevto/logutil"
+	"github.com/maelvls/hudevto/pager"
 )
 
 var (
@@ -39,11 +41,21 @@ var (
 	debug      = flag.Bool("debug", false, "Print debug information such as the HTTP requests that are being made in curl format.")
 )
 
-const help = `{{ if .Extended -}}
+const help = `{{- if .Extended -}}
+{{ section "NAME" }}
+
 hudevto allows you to synchronize your Hugo posts with your DEV articles. The
 synchronization is one way (Hugo to DEV). A Hugo post is only pushed when a
 change is detected. When pushed to DEV, the Hugo article is transformed a bit,
 e.g., relative image links are absolutified (see TRANSFORMATIONS).
+{{ end }}
+{{ section "SYNOPSYS" }}
+
+    hudevto [OPTION] (preview|diff) POST
+    hudevto [OPTION] status [POST]
+    hudevto [OPTION] push [POST]
+    hudevto [OPTION] devto list
+{{- if .Extended }}
 
 {{ section "IMPORTANT" }}
 
@@ -56,15 +68,8 @@ assumptions are made:
 3. The base_url is set in config.yml.
 4. Each article has the "url" field set in its front-matter.
 
-{{ end }}
-{{ section "USAGE" }}
-  hudevto [OPTION] (preview|diff) POST
-  hudevto [OPTION] status [POST]
-  hudevto [OPTION] push [POST]
-  hudevto [OPTION] devto list
-{{- if .Extended }}
-
 {{ section "HOW TO USE IT" }}
+
 In order to operate, hudevto requires you to have your DEV account configured
 with "Publish to DEV Community from your blog's RSS". You can configure that at
 {{ url "https://dev.to/settings/extensions" }}. DEV will create a draft article for
@@ -196,13 +201,19 @@ func main() {
 				log.Fatal(err)
 			}
 
-			err = t.Execute(os.Stderr, struct{ Extended bool }{
-				Extended: extended,
+			pager.Main(context.Background(), func(_ context.Context, out io.WriteCloser) int {
+				err = t.Execute(out, struct{ Extended bool }{
+					Extended: extended,
+				})
+				if err != nil {
+					log.Fatal(err)
+				}
+				flag.CommandLine.SetOutput(out)
+				flag.PrintDefaults()
+
+				return 0
 			})
-			if err != nil {
-				log.Fatal(err)
-			}
-			flag.PrintDefaults()
+
 		}
 	}
 	flag.Usage = printHelp(false)
