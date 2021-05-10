@@ -134,12 +134,12 @@ The transformations are:
 
 	becomes:
 
-	    ![wireshark](https://maelvls/debug-k8s/wireshark.png)
-		             <--"base_url"-><---------- "url" --------->
+	    ![wireshark](/debug-k8s/wireshark.png)
+		             <---(1)--->
 
-    where "base_url" is the field in config.yml, and "url" is the field in the
-	fron-matter of the file ./debug-k8s/index.md. Note that
-	the ![]() tag must span a single line. Otherwise, it won't be transformed.
+    where (1) is the article's Hugo permalink to the ./debug-k8s/index.md post.
+	Note that the ![]() tag must span a single line. Otherwise, it won't be
+	transformed.
 
 	The <img src=""> HTML tags are also transformed from
 
@@ -824,8 +824,8 @@ func convertHugoToLiquid(in string) string {
 //
 // with:
 //
-//  ![My image](https://maelvls.dev/you-should-write-comments/cover-you-should-write-comments.png)
-//              <---------------basePostURL ----------------->
+//  ![My image](/you-should-write-comments/cover-you-should-write-comments.png)
+//              <------ basePostURL ------>
 //             (note that basePostURL includes the trailing '/')
 //
 // Note: (?s) means multiline, (?U) means non-greedy.
