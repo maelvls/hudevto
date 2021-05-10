@@ -42,9 +42,20 @@ var (
 const help = `{{ if .Extended -}}
 hudevto allows you to synchronize your Hugo posts with your DEV articles. The
 synchronization is one way (Hugo to DEV). A Hugo post is only pushed when a
-change is detected. When pushed to DEV, the Hugo article is applied two
-transformations: the relative image links are absolutified, and the Hugo tags
-are turned into Liquid tags.
+change is detected. When pushed to DEV, the Hugo article is transformed a bit,
+e.g., relative image links are absolutified (see TRANSFORMATIONS).
+
+{{ section "IMPORTANT" }}
+
+hudevto has been mainly built for pushing https://maelvls.dev, and the following
+assumptions are made:
+
+1. Each blog post is in its own folder and the article itself is in index.md,
+   e.g. ./content/post-1/index.md.
+2. The images are hosted along with the index.md file.
+3. The base_url is set in config.yml.
+4. Each article has the "url" field set in its front-matter.
+
 {{ end }}
 {{ section "USAGE" }}
   hudevto [OPTION] (preview|diff) POST
@@ -53,7 +64,7 @@ are turned into Liquid tags.
   hudevto [OPTION] devto list
 {{- if .Extended }}
 
-{{ section "DESCRIPTION" }}
+{{ section "HOW TO USE IT" }}
 In order to operate, hudevto requires you to have your DEV account configured
 with "Publish to DEV Community from your blog's RSS". You can configure that at
 {{ url "https://dev.to/settings/extensions" }}. DEV will create a draft article for
@@ -104,6 +115,42 @@ Finally, you can push to DEV:
     {{ out "success: ./content/cloth-impossible.md pushed to https://dev.to/maelvls/cloth-impossible-95dc" }}
     {{ out "success: ./content/powder-farmer.md pushed to https://dev.to/maelvls/powder-farmer-6a18" }}
 {{ end }}
+
+{{ section "TRANSFORMATIONS" }}
+The Markdown for Hugo posts and {{ url "dev.to" }} articles have slight differences.
+Before pushing to {{ url "dev.to" }}, hudevto does some transformations to the Markdown
+file. To see the transformations before pushing the Hugo post to dev.to, use one of:
+
+    {{ cmd "hudevto diff ./debug-k8s/index.md" }}
+
+The transformations are:
+
+1. ABSOLUTE IMAGE LINKS: the relative image links are absolutified since hudevto will make use
+   of your Hugo-hosted images when pushing to a dev.to article.
+
+   The following Hugo Markdown snippet:
+
+        ![wireshark](wireshark.png)
+
+	becomes:
+
+	    ![wireshark](https://maelvls/debug-k8s/wireshark.png)
+		             <--"base_url"-><---------- "url" --------->
+
+    where "base_url" is the field in config.yml, and "url" is the field in the
+	fron-matter of the file ./debug-k8s/index.md. Note that
+	the ![]() tag must span a single line. Otherwise, it won't be transformed.
+
+	The <img src=""> HTML tags are also transformed from
+
+	    <img alt="wireshark" src="wireshark.png">
+
+	to:
+
+	    <img alt="wireshark" src="https://maelvls/debug-k8s/wireshark.png">
+
+2. SHORTCODES: Hugo shortcodes for embedding (like for embedding a Youtube video)
+   are turned into Liquid tags that dev.to knows about.
 
 {{ section "COMMANDS" }}
   hudevto status [POST]
