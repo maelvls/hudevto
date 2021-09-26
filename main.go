@@ -184,7 +184,6 @@ More help is available with the command {{ yel "hudevto help" }}.
 `
 
 func main() {
-
 	printHelp := func(extended bool) func() {
 		return func() {
 			t, err := template.New("test").Funcs(map[string]interface{}{
@@ -513,12 +512,11 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 			return nil
 		}
 
-		existing, err := GetArticle(httpClient, devtoId)
-		if err != nil {
-			logutil.Errorf("%s: fetching devto id %s: %s",
+		existing, ok := articlesIdMap[devtoId]
+		if !ok {
+			logutil.Errorf("%s: the article id %s was not fetched from either /articles/me/published or /articles/me/unpublished",
 				logutil.Gray(pathToMD),
 				logutil.Yel(strconv.Itoa(devtoId)),
-				err,
 			)
 			continue
 		}
@@ -684,6 +682,18 @@ func (rt transport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return rt.wrapped.RoundTrip(r)
 }
 
+func selectArticle(articles []devto.Article, articleID uint32) (devto.Article, error) {
+	for _, article := range articles {
+		if article.ID == articleID {
+			return article, nil
+		}
+	}
+	return devto.Article{}, fmt.Errorf("article id %d not found", articleID)
+}
+
+// Get the published article using its ID. Note that it does not work for
+// unpublished articles.
+// https://developers.forem.com/api#operation/getArticleById
 func GetArticle(client *http.Client, articleID int) (devto.Article, error) {
 	path := fmt.Sprintf("/api/articles/%d", articleID)
 	req, err := http.NewRequest("GET", "https://dev.to"+path, nil)
@@ -719,6 +729,7 @@ func GetArticle(client *http.Client, articleID int) (devto.Article, error) {
 	return art, nil
 }
 
+// https://developers.forem.com/api#operation/updateArticle
 func UpdateArticle(client *http.Client, articleID int, article Article) (devto.Article, error) {
 	articleReq := ArticleReq{Article: article}
 	raw, err := json.Marshal(&articleReq)
