@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"html/template"
 	"io"
 	"io/ioutil"
 	"log"
@@ -17,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/MakeNowJust/heredoc"
@@ -167,8 +167,8 @@ The transformations are:
 
 	becomes:
 
-	    ![wireshark](/debug-k8s/wireshark.png)
-		             <---(1)--->
+        ![wireshark](/debug-k8s/wireshark.png)
+                     <--(1)--->
 
     where (1) is the article's Hugo permalink to the ./debug-k8s/index.md post.
 	Note that the ![]() tag must span a single line. Otherwise, it won't be
@@ -881,5 +881,5 @@ func addPostURLInImages(in string, basePostURL string) string {
 var htmlImg = regexp.MustCompile(`(?sU)src="([^"]*(png|PNG|jpeg|JPG|jpg|gif|GIF))"`)
 
 func addPostURLInHTMLImages(in string, basePostURL string) string {
-	return mdImg.ReplaceAllString(in, `src="`+basePostURL+`$1"`)
+	return htmlImg.ReplaceAllString(in, `src="`+basePostURL+`$1"`)
 }
