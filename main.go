@@ -41,21 +41,50 @@ var (
 	debug      = flag.Bool("debug", false, "Print debug information such as the HTTP requests that are being made in curl format.")
 )
 
-const help = `{{- if .Extended -}}
-{{ section "NAME" }}
+const usageErrMsg = `
+usage:
+  hudevto status [POST]
+  hudevto (preview|diff) POST
+  hudevto push [POST]
+  hudevto devto list
+  hudevto help
+
+{{- if .WithOptionsSection}}
+
+options:
+{{ end -}}
+`
+
+const help = `
+{{- section "NAME" }}
 
 hudevto allows you to synchronize your Hugo posts with your DEV articles. The
 synchronization is one way (Hugo to DEV). A Hugo post is only pushed when a
 change is detected. When pushed to DEV, the Hugo article is transformed a bit,
 e.g., relative image links are absolutified (see TRANSFORMATIONS).
-{{ end }}
-{{ section "SYNOPSYS" }}
 
-    hudevto [OPTION] (preview|diff) POST
-    hudevto [OPTION] status [POST]
-    hudevto [OPTION] push [POST]
-    hudevto [OPTION] devto list
-{{- if .Extended }}
+{{ section "COMMANDS" }}
+
+  hudevto status [POST]
+      Shows the status of each post (or of a single post). The status shows
+      whether it is mapped to a DEV article and if a push is required when the
+      Hugo post has changes that are not on DEV yet.
+
+  hudevto preview POST
+      Displays a Markdown preview of the Hugo post that has been converted into
+      the DEV article Markdown format. You can use this command to check that
+      the tranformations were correctly applied.
+
+  hudevto diff POST
+      Displays a diff between the Hugo post and the DEV article. It is useful
+      when you want to see what changes will be pushed.
+
+  hudevto push [POST]
+      Pushes the given Hugo Markdown post to DEV. If no post is given, then
+      all posts are pushed.
+
+  hudevto devto list
+      Lists all the articles you have on your DEV account.
 
 {{ section "IMPORTANT" }}
 
@@ -119,7 +148,6 @@ Finally, you can push to DEV:
     {{ out "success: ./content/brick-chest.md pushed to https://dev.to/maelvls/brick-chest-2588" }}
     {{ out "success: ./content/cloth-impossible.md pushed to https://dev.to/maelvls/cloth-impossible-95dc" }}
     {{ out "success: ./content/powder-farmer.md pushed to https://dev.to/maelvls/powder-farmer-6a18" }}
-{{ end }}
 
 {{ section "TRANSFORMATIONS" }}
 The Markdown for Hugo posts and {{ url "dev.to" }} articles have slight differences.
@@ -157,65 +185,57 @@ The transformations are:
 2. SHORTCODES: Hugo shortcodes for embedding (like for embedding a Youtube video)
    are turned into Liquid tags that dev.to knows about.
 
-{{ section "COMMANDS" }}
-  hudevto status [POST]
-      Shows the status of each post (or of a single post). The status shows
-      whether it is mapped to a DEV article and if a push is required when the
-      Hugo post has changes that are not on DEV yet.
-  hudevto preview POST
-      Displays a Markdown preview of the Hugo post that has been converted into
-      the DEV article Markdown format. You can use this command to check that
-      the tranformations were correctly applied.
-  hudevto diff POST
-      Displays a diff between the Hugo post and the DEV article. It is useful
-      when you want to see what changes will be pushed.
-  hudevto push [POST]
-      Pushes the given Hugo Markdown post to DEV. If no post is given, then
-      all posts are pushed.
-  hudevto devto list
-      Lists all the articles you have on your DEV account.
-
-{{ if not .Extended -}}
-More help is available with the command {{ yel "hudevto help" }}.
-
-{{ end -}}
-
 {{ section "OPTIONS" }}
 `
 
 func main() {
-	printHelp := func(extended bool) func() {
+	printHelpWithPager := func() {
+		t, err := template.New("test").Funcs(map[string]interface{}{
+			"section": ansi.ColorFunc("black+hb"),
+			"url":     ansi.ColorFunc("white+u"),
+			"grey":    ansi.ColorFunc("white+d"),
+			"yel":     ansi.ColorFunc("yellow"),
+			"cmd": func(cmd string) string {
+				return ansi.ColorFunc("white+d")("% ") + ansi.ColorFunc("yellow+b")(cmd)
+			},
+			"out": ansi.ColorFunc("white+d"),
+		}).Parse(help)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		pager.Main(context.Background(), func(_ context.Context, out io.WriteCloser) int {
+			err = t.Execute(out, nil)
+			if err != nil {
+				log.Fatal(err)
+			}
+			flag.CommandLine.SetOutput(out)
+			flag.PrintDefaults()
+
+			return 0
+		})
+	}
+
+	printUsage := func(withOptions bool) func() {
 		return func() {
-			t, err := template.New("test").Funcs(map[string]interface{}{
-				"section": ansi.ColorFunc("black+hb"),
-				"url":     ansi.ColorFunc("white+u"),
-				"grey":    ansi.ColorFunc("white+d"),
-				"yel":     ansi.ColorFunc("yellow"),
-				"cmd": func(cmd string) string {
-					return ansi.ColorFunc("white+d")("% ") + ansi.ColorFunc("yellow+b")(cmd)
-				},
-				"out": ansi.ColorFunc("white+d"),
-			}).Parse(help)
+			t, err := template.New("test").Parse(usageErrMsg)
+			if err != nil {
+				log.Fatal(err)
+			}
+			err = t.Execute(flag.CommandLine.Output(), struct{ WithOptionsSection bool }{
+				WithOptionsSection: withOptions,
+			})
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			pager.Main(context.Background(), func(_ context.Context, out io.WriteCloser) int {
-				err = t.Execute(out, struct{ Extended bool }{
-					Extended: extended,
-				})
-				if err != nil {
-					log.Fatal(err)
-				}
-				flag.CommandLine.SetOutput(out)
+			if withOptions {
 				flag.PrintDefaults()
-
-				return 0
-			})
-
+			}
 		}
 	}
-	flag.Usage = printHelp(false)
+
+	flag.Usage = printUsage(true)
 
 	flag.Parse()
 	logutil.EnableDebug = *debug
@@ -268,16 +288,16 @@ func main() {
 		logutil.Errorf("did you mean 'list'? Try the command:\n    hudevto devto list")
 		os.Exit(1)
 	case "help":
-		printHelp(true)()
+		printHelpWithPager()
 		os.Exit(0)
 	case "":
 		logutil.Errorf("no command has been given.")
-		printHelp(false)()
-		os.Exit(1)
+		printUsage(false)()
+		os.Exit(124)
 	default:
 		logutil.Errorf("unknown command '%s'.", flag.Arg(0))
-		printHelp(false)()
-		os.Exit(1)
+		printUsage(false)()
+		os.Exit(124)
 	}
 }
 
