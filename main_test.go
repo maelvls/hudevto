@@ -32,3 +32,19 @@ func Test_convertAnchorIDs(t *testing.T) {
 		})
 	}
 }
+
+func Test_addPostURLInHTMLImages(t *testing.T) {
+	tests := []struct {
+		given, expect string
+	}{
+		{
+			`<img alt="Super example" src="dnat-google-vpc-how-comes-back.svg" width="80%"/>`,
+			`<img alt="Super example" src="/you-should-write-comments/dnat-google-vpc-how-comes-back.svg" width="80%"/>`,
+		},
+	}
+	for i, tt := range tests {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			assert.Equal(t, tt.expect, addPostURLInHTMLImages(tt.given, "/you-should-write-comments/"))
+		})
+	}
+}

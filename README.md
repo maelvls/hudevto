@@ -187,8 +187,23 @@ I use the `hudevto preview` command because I do some transformations and I need
   ```text
   ![My image](/you-should-write-comments/cover-you-should-write-comments.png)
               <------ basePostURL ------>
-              (basePostURL includes the trailing /)
+              (basePostURL includes the leading / and trailing /)
   ```
+
+  Since you can also embed `<img>` tags in markdown, these are also converted. For example,
+
+  ```markdown
+  <img alt="Super example" src="dnat-google-vpc-how-comes-back.svg" width="80%"/>
+  ```
+
+  becomes:
+
+  ```markdown
+  <img alt="Super example" src="/you-should-write-comments/dnat-google-vpc-how-comes-back.svg" width="80%"/>
+  ```
+
+  Only the following image extensions are converted: png, PNG, jpeg, JPG, jpg,
+  gif, GIF, svg, SVG.
 
 - The GitHub-style anchor IDs are converted to Devto anchor IDs. This is because
   GitHub-style anchor IDs, which is what Hugo produces, are different from the

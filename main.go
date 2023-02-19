@@ -869,7 +869,7 @@ func convertHugoToLiquid(in string) string {
 //
 //	![My image](/you-should-write-comments/cover-you-should-write-comments.png)
 //	            <------ basePostURL ------>
-//	           (note that basePostURL includes the trailing '/')
+//	           (basePostURL already includes the leading / and trailing /)
 //
 // Note: (?s) means multiline, (?U) means non-greedy.
 var mdImg = regexp.MustCompile(`(?sU)\!\[([^\]]*)\]\((\S*)\)`)
@@ -878,8 +878,10 @@ func addPostURLInImages(in string, basePostURL string) string {
 	return mdImg.ReplaceAllString(in, "![$1]("+basePostURL+"$2)")
 }
 
+// Same, but for HTML <img> tags embedded in Markdown.
+//
 // (?s) means multiline, (?U) means non-greedy.
-var htmlImg = regexp.MustCompile(`(?sU)src="([^"]*(png|PNG|jpeg|JPG|jpg|gif|GIF))"`)
+var htmlImg = regexp.MustCompile(`(?sU)src="([^"]*(png|PNG|jpeg|JPG|jpg|gif|GIF|svg|SVG))"`)
 
 func addPostURLInHTMLImages(in string, basePostURL string) string {
 	return htmlImg.ReplaceAllString(in, `src="`+basePostURL+`$1"`)
