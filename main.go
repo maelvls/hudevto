@@ -22,6 +22,7 @@ import (
 	"github.com/MakeNowJust/heredoc"
 	"github.com/VictorAvelar/devto-api-go/devto"
 	"github.com/gohugoio/hugo/common/loggers"
+	"github.com/gohugoio/hugo/config"
 	"github.com/gohugoio/hugo/deps"
 	"github.com/gohugoio/hugo/hugofs"
 	"github.com/gohugoio/hugo/hugolib"
@@ -29,7 +30,6 @@ import (
 	"github.com/mgutz/ansi"
 	"github.com/sethgrid/gencurl"
 	"github.com/spf13/jwalterweatherman"
-	"github.com/spf13/viper"
 
 	"github.com/maelvls/hudevto/logutil"
 	"github.com/maelvls/hudevto/pager"
@@ -524,6 +524,7 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 		body = convertHugoToLiquid(body)
 		body = addPostURLInImages(body, page.Permalink())
 		body = addPostURLInHTMLImages(body, page.Permalink())
+		body = convertAnchorIDs(body)
 
 		content += body
 
@@ -649,7 +650,7 @@ func PrintDevtoArticles(apiKey string) error {
 	return nil
 }
 
-func loadHugoConfig(root string) (*viper.Viper, error) {
+func loadHugoConfig(root string) (config.Provider, error) {
 	if !filepath.IsAbs(root) {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -844,11 +845,11 @@ var hugoTag = regexp.MustCompile("{{< ([a-z]+) (.*) >}}")
 
 // Hugo tag:
 //
-//   {{< youtube 30a0WrfaS2A >}}
+//	{{< youtube 30a0WrfaS2A >}}
 //
 // Devto liquid:
 //
-//   {% youtube 30a0WrfaS2A %}
+//	{% youtube 30a0WrfaS2A %}
 //
 // Ref: https://docs.dev.to/frontend/liquid-tags
 func convertHugoToLiquid(in string) string {
@@ -858,17 +859,17 @@ func convertHugoToLiquid(in string) string {
 // I want to be able to add the base post URL to each image. For example,
 // imagine that the post is
 //
-//  https://maelvls.dev/you-should-write-comments/index.md
+//	https://maelvls.dev/you-should-write-comments/index.md
 //
 // then I need to replace the images, such as:
 //
-//  ![My image](cover-you-should-write-comments.png)
+//	![My image](cover-you-should-write-comments.png)
 //
 // with:
 //
-//  ![My image](/you-should-write-comments/cover-you-should-write-comments.png)
-//              <------ basePostURL ------>
-//             (note that basePostURL includes the trailing '/')
+//	![My image](/you-should-write-comments/cover-you-should-write-comments.png)
+//	            <------ basePostURL ------>
+//	           (note that basePostURL includes the trailing '/')
 //
 // Note: (?s) means multiline, (?U) means non-greedy.
 var mdImg = regexp.MustCompile(`(?sU)\!\[([^\]]*)\]\((\S*)\)`)
@@ -882,4 +883,56 @@ var htmlImg = regexp.MustCompile(`(?sU)src="([^"]*(png|PNG|jpeg|JPG|jpg|gif|GIF)
 
 func addPostURLInHTMLImages(in string, basePostURL string) string {
 	return htmlImg.ReplaceAllString(in, `src="`+basePostURL+`$1"`)
+}
+
+// The convertAnchorIDs function reads Markdown, finds any anchor-based link of
+// the form [foo](#foo) and converts the GitHub-style anchor IDs to Devto anchor
+// IDs. This is because GitHub-style anchor IDs, which is what Hugo produces,
+// are different from the ones produced by Devto. For example, take the
+// following Markdown:
+//
+// Example:
+//
+//	[`go get -u` vs. `go.mod` (= *_problem_*)](#go-get--u-vs-gomod--_problem_)
+//
+// becomes
+//
+//	[`go get -u` vs. `go.mod` (= *_problem_*)](#-raw-go-get-u-endraw-vs-raw-gomod-endraw-problem)
+
+var linkWithOnlyAnchor = regexp.MustCompile(`\[([^\]]*)\]\(#([^\)]*)\)`)
+var code = regexp.MustCompile("`([^`]*)`")
+var whitespace = regexp.MustCompile(`\s+`)
+var nonAlphaNumExceptDashAndSpace = regexp.MustCompile(`[^-a-zA-Z0-9]`)
+var multipleDashes = regexp.MustCompile(`-{2,}`)
+
+func convertAnchorIDs(in string) string {
+	return linkWithOnlyAnchor.ReplaceAllStringFunc(in, func(s string) string {
+		matches := linkWithOnlyAnchor.FindStringSubmatch(s)
+		if len(matches) != 3 {
+			return s
+		}
+
+		//  [`go get -u` vs. `go.mod` (= *_problem_*)](#go-get--u-vs-gomod--_problem_)
+		//   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+		//                    text
+		text := matches[1]
+
+		// Rule 1: `foo` is converted to `raw-foo-endraw-`.
+		text = code.ReplaceAllString(text, "-raw-$1-endraw-")
+
+		// Rule 2: whitespaces (spaces and tabs) are replaced with a dash (-).
+		text = whitespace.ReplaceAllString(text, "-")
+
+		// Rule 3: all other non-alphanumeric characters are removed.
+		text = nonAlphaNumExceptDashAndSpace.ReplaceAllString(text, "")
+
+		// Rule 4: two dashes or more are combined into a single dash.
+		text = multipleDashes.ReplaceAllString(text, "-")
+
+		// Rule 5: the anchor ID is lowercase.
+		text = strings.ToLower(text)
+
+		// Replace the anchor ID.
+		return strings.Replace(s, "#"+matches[2], "#"+text, 1)
+	})
 }
