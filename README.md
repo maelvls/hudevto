@@ -171,6 +171,39 @@ I use the `hudevto preview` command because I do some transformations and I need
   └── packet-routing-with-akrobateo.png
   ```
 
+- I want to be able to add the base post URL to each image. For example,
+  imagine that the post is
+
+  https://maelvls.dev/you-should-write-comments/index.md
+
+  then I need to replace the images, such as:
+
+  ```markdown
+  ![My image](cover-you-should-write-comments.png)
+  ```
+
+  with:
+
+  ```text
+  ![My image](/you-should-write-comments/cover-you-should-write-comments.png)
+              <------ basePostURL ------>
+              (basePostURL includes the trailing /)
+  ```
+
+- The GitHub-style anchor IDs are converted to Devto anchor IDs. This is because
+  GitHub-style anchor IDs, which is what Hugo produces, are different from the
+  ones produced by Devto. For example, take the following Markdown:
+
+  ```markdown
+  [`go get -u` vs. `go.mod` (= _*Problem*_)](#go-get--u-vs-gomod--_problem_)
+  ```
+
+  becomes:
+
+  ```markdown
+  [`go get -u` vs. `go.mod` (= _*Problem*_)](#-raw-go-get-u-endraw-vs-raw-gomod-endraw-problem)
+  ```
+
 **Note:** that Hugo uses soft breaks for new lines as per the CommonMark
 spec, but dev.to uses the "Markdown Here" conventions which use a hard
 break on new lines; to work around that, see the below

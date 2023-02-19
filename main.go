@@ -891,13 +891,11 @@ func addPostURLInHTMLImages(in string, basePostURL string) string {
 // are different from the ones produced by Devto. For example, take the
 // following Markdown:
 //
-// Example:
-//
-//	[`go get -u` vs. `go.mod` (= *_problem_*)](#go-get--u-vs-gomod--_problem_)
+//	[`go get -u` vs. `go.mod` (= *_Problem_*)](#go-get--u-vs-gomod--_problem_)
 //
 // becomes
 //
-//	[`go get -u` vs. `go.mod` (= *_problem_*)](#-raw-go-get-u-endraw-vs-raw-gomod-endraw-problem)
+//	[`go get -u` vs. `go.mod` (= *_Problem_*)](#-raw-go-get-u-endraw-vs-raw-gomod-endraw-problem)
 
 var linkWithOnlyAnchor = regexp.MustCompile(`\[([^\]]*)\]\(#([^\)]*)\)`)
 var code = regexp.MustCompile("`([^`]*)`")
