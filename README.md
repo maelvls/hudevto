@@ -24,21 +24,49 @@
 
 ## Usage
 
-```sh
+```bash
 % hudevto help
 hudevto allows you to synchronize your Hugo posts with your DEV articles. The
 synchronization is one way (Hugo to DEV). A Hugo post is only pushed when a
-change is detected. When pushed to DEV, the Hugo article is applied two
-transformations: the relative image links are absolutified, and the Hugo tags
-are turned into Liquid tags.
+change is detected. When pushed to DEV, the Hugo article is transformed a bit,
+e.g., relative image links are absolutified (see TRANSFORMATIONS).
 
-USAGE
-  hudevto [OPTION] (preview|diff) POST
-  hudevto [OPTION] status [POST]
-  hudevto [OPTION] push [POST]
-  hudevto [OPTION] devto list
+COMMANDS
 
-DESCRIPTION
+  hudevto status [POST]
+      Shows the status of each post (or of a single post). The status shows
+      whether it is mapped to a DEV article and if a push is required when the
+      Hugo post has changes that are not on DEV yet.
+
+  hudevto preview [POST]
+      Displays a Markdown preview of the Hugo post that has been converted into
+      the DEV article Markdown format. You can use this command to check that
+      the tranformations were correctly applied.
+
+  hudevto diff [POST]
+      Displays a diff between the Hugo post and the DEV article. It is useful
+      when you want to see what changes will be pushed.
+
+  hudevto push [POST]
+      Pushes the given Hugo Markdown post to DEV. If no post is given, then
+      all posts are pushed.
+
+  hudevto devto list
+      Lists all the articles you have on your DEV account.
+
+IMPORTANT
+
+hudevto has been mainly built for pushing https://maelvls.dev, and the following
+assumptions are made:
+
+1. Each blog post is in its own folder and the article itself is in index.md,
+   e.g. ./content/post-1/index.md.
+2. The images are hosted along with the index.md file.
+3. The base_url is set in config.yml.
+4. Each article has the "url" field set in its front-matter.
+
+HOW TO USE IT
+
 In order to operate, hudevto requires you to have your DEV account configured
 with "Publish to DEV Community from your blog's RSS". You can configure that at
 https://dev.to/settings/extensions. DEV will create a draft article for
@@ -89,24 +117,49 @@ Finally, you can push to DEV:
     success: ./content/cloth-impossible.md pushed to https://dev.to/maelvls/cloth-impossible-95dc
     success: ./content/powder-farmer.md pushed to https://dev.to/maelvls/powder-farmer-6a18
 
+TRANSFORMATIONS
+The Markdown for Hugo posts and dev.to articles have slight differences.
+Before pushing to dev.to, hudevto does some transformations to the Markdown
+file. To see the transformations before pushing the Hugo post to dev.to, use one of:
 
-COMMANDS
-  hudevto status [POST]
-      Shows the status of each post (or of a single post). The status shows
-      whether it is mapped to a DEV article and if a push is required when the
-      Hugo post has changes that are not on DEV yet.
-  hudevto preview POST
-      Displays a Markdown preview of the Hugo post that has been converted into
-      the DEV article Markdown format. You can use this command to check that
-      the tranformations were correctly applied.
-  hudevto diff POST
-      Displays a diff between the Hugo post and the DEV article. It is useful
-      when you want to see what changes will be pushed.
-  hudevto push [POST]
-      Pushes the given Hugo Markdown post to DEV. If no post is given, then
-      all posts are pushed.
-  hudevto devto list
-      Lists all the articles you have on your DEV account.
+    % hudevto diff ./debug-k8s/index.md
+
+The transformations are:
+
+1. ABSOLUTE MARKDOWN IMAGES: the relative image links are absolutified since
+   dev.to needs the image path to be absolute (the base URL itself is not
+   required).
+
+   The following Hugo Markdown snippet:
+
+     ![wireshark](wireshark.png)
+
+    becomes:
+
+      ![wireshark](/debug-k8s/wireshark.png)
+                   &lt;--(1)--->
+
+    where (1) is the article's Hugo permalink to the ./debug-k8s/index.md post.
+    Note that the ![]() tag must span a single line. Otherwise, it won't be
+    transformed.
+
+2. ABSOLUTE HTML IMG TAGS: unlike with Markdown images, the <img> HTML tags
+   need to be absolute and needs to contain the base URL. For example, the
+   following HTML:
+
+        <img src="wireshark.png">
+
+    gets transformed to:
+
+        <img src="https://maelvls/debug-k8s/wireshark.png">
+
+    The <img> tag must be on a single line, and the "src" value must end with
+	one of the following extensions: png, PNG, jpeg, JPG, jpg, gif, GIF, svg,
+	SVG.
+
+3. SHORTCODES: Hugo shortcodes for embedding (like for embedding a Youtube video)
+   are turned into Liquid tags that dev.to knows about.
+4. ANCHOR IDS: Hugo and Devto have different anchor ID syntaxes.
 
 OPTIONS
   -apikey string
