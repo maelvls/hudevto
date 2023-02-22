@@ -159,7 +159,9 @@ I use the `hudevto preview` command because I do some transformations and I need
   {% youtube 30a0WrfaS2A %}
   ```
 
-- Add the base URL of the post to the markdown images so that images are not broken. ONLY WORKS if your images are stored along side your blog post, such as:
+- Add the base URL of the post to the markdown images so that images are not
+  broken. ONLY WORKS if your images are stored along side your blog post, such
+  as:
 
   ```sh
   % ls --tree ./content/2020/avoid-gke-lb-using-hostport
@@ -171,12 +173,12 @@ I use the `hudevto preview` command because I do some transformations and I need
   └── packet-routing-with-akrobateo.png
   ```
 
-- I want to be able to add the base post URL to each image. For example,
-  imagine that the post is
+- The relative image links are "absolutified". This is needed so that Devto can
+  access the images. For example, the following post:
 
-  https://maelvls.dev/you-should-write-comments/index.md
+  <https://maelvls.dev/you-should-write-comments/index.md>
 
-  then I need to replace the images, such as:
+  then I need to replace the relative image paths such as
 
   ```markdown
   ![My image](cover-you-should-write-comments.png)
@@ -186,21 +188,57 @@ I use the `hudevto preview` command because I do some transformations and I need
 
   ```text
   ![My image](/you-should-write-comments/cover-you-should-write-comments.png)
-              <------ basePostURL ------>
-              (basePostURL includes the leading / and trailing /)
+              <----------------------->
+                        url
+               (from front matter)
   ```
 
-  Since you can also embed `<img>` tags in markdown, these are also converted. For example,
+  The prefix that gets added comes from the front matter of the Hugo post. Here
+  is an example of front matter:
+
+  ```yaml
+  ---
+  title: "Writing useful comments"
+  date: 2021-06-05
+  url: "/writing-useful-comments" # <--- THIS
+  ---
+  ```
+
+  The `url` part is only added if you are storing the images alongside your
+  post.
+
+  Note that the images using the syntax `![]()` tag must span a single line.
+  Otherwise, it won't be transformed.
+
+  ```sh
+  % ls --tree ./content/2020/avoid-gke-lb-using-hostport
+  ./content/2020/avoid-gke-lb-using-hostport
+  ├── cost-load-balancer-gke.png
+  ├── cover-external-dns.png
+  ├── how-service-controller-works-on-gke.png            # The image.
+  ├── index.md                                           # The post.
+  └── packet-routing-with-akrobateo.png
+  ```
+
+  If your images are stored in the `static` directory, it should still work.
+
+  Since you can also embed `<img>` tags in markdown, these are also converted.
+  For example:
 
   ```markdown
-  <img alt="Super example" src="dnat-google-vpc-how-comes-back.svg" width="80%"/>
+  <img src="dnat-google-vpc-how-comes-back.svg"/>
   ```
 
   becomes:
 
-  ```markdown
-  <img alt="Super example" src="/you-should-write-comments/dnat-google-vpc-how-comes-back.svg" width="80%"/>
+  ```text
+  <img src="https://maelvls.dev/you-should-write-comments/dnat-google-vpc-how-comes-back.svg"/>
+            <------------------><----------------------->
+                   base_url                url
+              (from config.yaml)    (from front matter)
   ```
+
+  Like above, the HTML `<img>` tag must span a single line.
 
   Only the following image extensions are converted: png, PNG, jpeg, JPG, jpg,
   gif, GIF, svg, SVG.

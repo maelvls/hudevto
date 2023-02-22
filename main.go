@@ -74,12 +74,12 @@ e.g., relative image links are absolutified (see TRANSFORMATIONS).
       whether it is mapped to a DEV article and if a push is required when the
       Hugo post has changes that are not on DEV yet.
 
-  hudevto preview POST
+  hudevto preview [POST]
       Displays a Markdown preview of the Hugo post that has been converted into
       the DEV article Markdown format. You can use this command to check that
       the tranformations were correctly applied.
 
-  hudevto diff POST
+  hudevto diff [POST]
       Displays a diff between the Hugo post and the DEV article. It is useful
       when you want to see what changes will be pushed.
 
@@ -162,32 +162,40 @@ file. To see the transformations before pushing the Hugo post to dev.to, use one
 
 The transformations are:
 
-1. ABSOLUTE IMAGE LINKS: the relative image links are absolutified since hudevto will make use
-   of your Hugo-hosted images when pushing to a dev.to article.
+1. ABSOLUTE MARKDOWN IMAGES: the relative image links are absolutified since
+   dev.to needs the image path to be absolute (the base URL itself is not
+   required).
 
    The following Hugo Markdown snippet:
 
-        ![wireshark](wireshark.png)
+     ![wireshark](wireshark.png)
 
-	becomes:
+    becomes:
 
-        ![wireshark](/debug-k8s/wireshark.png)
-                     <--(1)--->
+      ![wireshark](/debug-k8s/wireshark.png)
+                   <--(1)--->
 
     where (1) is the article's Hugo permalink to the ./debug-k8s/index.md post.
-	Note that the ![]() tag must span a single line. Otherwise, it won't be
-	transformed.
+    Note that the ![]() tag must span a single line. Otherwise, it won't be
+    transformed.
 
-	The <img src=""> HTML tags are also transformed from
+2. ABSOLUTE HTML IMG TAGS: unlike with Markdown images, the <img> HTML tags
+   need to be absolute and needs to contain the base URL. For example, the
+   following HTML:
 
-	    <img alt="wireshark" src="wireshark.png">
+        <img src="wireshark.png">
 
-	to:
+    gets transformed to:
 
-	    <img alt="wireshark" src="https://maelvls/debug-k8s/wireshark.png">
+        <img src="https://maelvls/debug-k8s/wireshark.png">
 
-2. SHORTCODES: Hugo shortcodes for embedding (like for embedding a Youtube video)
+    The <img> tag must be on a single line, and the "src" value must end with
+	one of the following extensions: png, PNG, jpeg, JPG, jpg, gif, GIF, svg,
+	SVG.
+
+3. SHORTCODES: Hugo shortcodes for embedding (like for embedding a Youtube video)
    are turned into Liquid tags that dev.to knows about.
+4. ANCHOR IDS: Hugo and Devto have different anchor ID syntaxes.
 
 {{ section "OPTIONS" }}
 `
