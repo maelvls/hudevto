@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"html/template"
 	"io"
 	"io/ioutil"
 	"log"
@@ -16,7 +17,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"text/template"
 	"time"
 
 	"github.com/MakeNowJust/heredoc"
@@ -28,8 +28,12 @@ import (
 	"github.com/gohugoio/hugo/hugolib"
 	"github.com/gohugoio/hugo/resources/page"
 	"github.com/mgutz/ansi"
+	"github.com/schollz/closestmatch"
 	"github.com/sethgrid/gencurl"
 	"github.com/spf13/jwalterweatherman"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
 
 	"github.com/maelvls/hudevto/logutil"
 	"github.com/maelvls/hudevto/pager"
@@ -44,7 +48,7 @@ var (
 const usageErrMsg = `
 usage:
   hudevto status [POST]
-  hudevto (preview|diff) POST
+  hudevto (preview|diff) [POST]
   hudevto push [POST]
   hudevto devto list
   hudevto help
@@ -393,7 +397,7 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 			}
 		}
 		if devtoSkip {
-			logutil.Debugf("%s: field devtoSkip is true, skipping this post.",
+			logutil.Infof("%s: field devtoSkip is true, skipping this post.",
 				logutil.Gray(pathToMD),
 			)
 			continue
@@ -524,7 +528,14 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 		body = convertHugoToLiquid(body)
 		body = addPostURLInImages(body, page.Permalink())
 		body = addPostURLInHTMLImages(body, page.Permalink())
-		body = convertAnchorIDs(body)
+
+		if len(sites.Sites) > 0 {
+			body = convertAnchorIDs(pathToMD, body, sites.Sites[0].SanitizeAnchorName)
+		} else {
+			logutil.Errorf("%s: no site found, cannot convert anchor IDs",
+				logutil.Gray(pathToMD),
+			)
+		}
 
 		content += body
 
@@ -550,6 +561,9 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 		}
 
 		if showDiff && existing.BodyMarkdown != content {
+			logutil.Infof("%s: found differences",
+				logutil.Gray(pathToMD),
+			)
 			fmt.Println(FormatDiff(existing.BodyMarkdown, content))
 			continue
 		}
@@ -878,7 +892,16 @@ func addPostURLInImages(in string, basePostURL string) string {
 	return mdImg.ReplaceAllString(in, "![$1]("+basePostURL+"$2)")
 }
 
-// Same, but for HTML <img> tags embedded in Markdown.
+// Since you can also embed `<img>` tags in markdown, these are also converted. For example,
+//
+//	<img alt="Super example" src="dnat-google-vpc-how-comes-back.svg" width="80%"/>
+//
+// is converted to:
+//
+//	<img alt="Super example" src="/you-should-write-comments/dnat-google-vpc-how-comes-back.svg" width="80%"/>
+//
+// Only the following image extensions are converted: png, PNG, jpeg, JPG, jpg,
+// gif, GIF, svg, SVG.
 //
 // (?s) means multiline, (?U) means non-greedy.
 var htmlImg = regexp.MustCompile(`(?sU)src="([^"]*(png|PNG|jpeg|JPG|jpg|gif|GIF|svg|SVG))"`)
@@ -905,34 +928,73 @@ var whitespace = regexp.MustCompile(`\s+`)
 var nonAlphaNumExceptDashAndSpace = regexp.MustCompile(`[^-a-zA-Z0-9]`)
 var multipleDashes = regexp.MustCompile(`-{2,}`)
 
-func convertAnchorIDs(in string) string {
+// only ATX headings are supported (headings of the form "# Title")
+func convertAnchorIDs(pathToMD, in string, sanitizeAnchorName func(s string) string) string {
+	inBytes := []byte(in)
+	parsed := goldmark.DefaultParser().Parse(text.NewReader(inBytes))
+
+	anchorToHeading := make(map[string]string)
+	ast.Walk(parsed, func(node ast.Node, _ bool) (ast.WalkStatus, error) {
+		headingNode, ok := node.(*ast.Heading)
+		if ok {
+			if headingNode.Lines().Len() != 1 {
+				logutil.Errorf("unexpected heading: %s", headingNode.Text(inBytes))
+				return ast.WalkContinue, nil
+			}
+			seg := headingNode.Lines().At(0)
+			heading := string(seg.Value(inBytes))
+
+			anchorToHeading[sanitizeAnchorName(heading)] = heading
+		}
+		return ast.WalkContinue, nil
+	})
+
 	return linkWithOnlyAnchor.ReplaceAllStringFunc(in, func(s string) string {
 		matches := linkWithOnlyAnchor.FindStringSubmatch(s)
 		if len(matches) != 3 {
 			return s
 		}
 
+		// We ignore the "text" part, since we will use the headings that we
+		// found when parsing the Markdown document.
+		//
 		//  [`go get -u` vs. `go.mod` (= *_problem_*)](#go-get--u-vs-gomod--_problem_)
-		//   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-		//                    text
-		text := matches[1]
+		//   <-------------------------------------->  <-------------------------->
+		//                text is ignored                         anchor
+		anchor := matches[2]
+		heading, found := anchorToHeading[anchor]
+		if !found {
+			possibleAnchors := make([]string, 0, len(anchorToHeading))
+			for anchor := range anchorToHeading {
+				possibleAnchors = append(possibleAnchors, anchor)
+			}
+			matcher := closestmatch.New(possibleAnchors, []int{2})
+
+			logutil.Errorf("%s: anchor %q in link %s doesn't exist in the document. Did you mean %s?",
+				logutil.Gray(pathToMD),
+				anchor, s,
+				matcher.Closest(anchor),
+			)
+
+			return s
+		}
 
 		// Rule 1: `foo` is converted to `raw-foo-endraw-`.
-		text = code.ReplaceAllString(text, "-raw-$1-endraw-")
+		heading = code.ReplaceAllString(heading, "-raw-$1-endraw-")
 
 		// Rule 2: whitespaces (spaces and tabs) are replaced with a dash (-).
-		text = whitespace.ReplaceAllString(text, "-")
+		heading = whitespace.ReplaceAllString(heading, "-")
 
 		// Rule 3: all other non-alphanumeric characters are removed.
-		text = nonAlphaNumExceptDashAndSpace.ReplaceAllString(text, "")
+		heading = nonAlphaNumExceptDashAndSpace.ReplaceAllString(heading, "")
 
 		// Rule 4: two dashes or more are combined into a single dash.
-		text = multipleDashes.ReplaceAllString(text, "-")
+		heading = multipleDashes.ReplaceAllString(heading, "-")
 
 		// Rule 5: the anchor ID is lowercase.
-		text = strings.ToLower(text)
+		heading = strings.ToLower(heading)
 
 		// Replace the anchor ID.
-		return strings.Replace(s, "#"+matches[2], "#"+text, 1)
+		return strings.Replace(s, "#"+matches[2], "#"+heading, 1)
 	})
 }

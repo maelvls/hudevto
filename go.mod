@@ -5,12 +5,12 @@ go 1.17
 require (
 	github.com/MakeNowJust/heredoc v1.0.0
 	github.com/VictorAvelar/devto-api-go v1.0.0
+	github.com/davecgh/go-spew v1.1.1
 	github.com/gohugoio/hugo v0.110.0
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 	github.com/sergi/go-diff v1.3.1
 	github.com/sethgrid/gencurl v0.0.0-20161025011400-a3af93c1aba4
 	github.com/spf13/jwalterweatherman v1.1.0
-	github.com/spf13/viper v1.15.0
 	github.com/stretchr/testify v1.8.1
 	golang.org/x/crypto v0.6.0
 )
@@ -32,7 +32,6 @@ require (
 	github.com/bep/tmc v0.5.1 // indirect
 	github.com/clbanning/mxj/v2 v2.5.7 // indirect
 	github.com/cli/safeexec v1.0.1 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/disintegration/gift v1.2.1 // indirect
 	github.com/dlclark/regexp2 v1.8.0 // indirect
 	github.com/evanw/esbuild v0.17.8 // indirect
@@ -50,14 +49,12 @@ require (
 	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/hairyhenderson/go-codeowners v0.3.0 // indirect
-	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/invopop/yaml v0.2.0 // indirect
 	github.com/jdkato/prose v1.2.1 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/kyokomi/emoji/v2 v2.2.12 // indirect
-	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/marekm4/color-extractor v1.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
@@ -76,10 +73,10 @@ require (
 	github.com/rogpeppe/go-internal v1.9.0 // indirect
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd // indirect
 	github.com/sanity-io/litter v1.5.5 // indirect
+	github.com/schollz/closestmatch v2.1.0+incompatible
 	github.com/spf13/afero v1.9.3 // indirect
 	github.com/spf13/cast v1.5.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/subosito/gotenv v1.4.2 // indirect
 	github.com/tdewolff/minify/v2 v2.12.4 // indirect
 	github.com/tdewolff/parse/v2 v2.6.5 // indirect
 	github.com/yuin/goldmark v1.5.4 // indirect
@@ -92,7 +89,6 @@ require (
 	golang.org/x/text v0.7.0 // indirect
 	golang.org/x/tools v0.6.0 // indirect
 	google.golang.org/protobuf v1.28.1 // indirect
-	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
