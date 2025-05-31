@@ -21,8 +21,9 @@ import (
 
 	"github.com/MakeNowJust/heredoc"
 	"github.com/VictorAvelar/devto-api-go/devto"
-	"github.com/gohugoio/hugo/common/loggers"
+	"github.com/bep/logg"
 	"github.com/gohugoio/hugo/config"
+	"github.com/gohugoio/hugo/config/allconfig"
 	"github.com/gohugoio/hugo/deps"
 	"github.com/gohugoio/hugo/hugofs"
 	"github.com/gohugoio/hugo/hugolib"
@@ -30,7 +31,6 @@ import (
 	"github.com/mgutz/ansi"
 	"github.com/schollz/closestmatch"
 	"github.com/sethgrid/gencurl"
-	"github.com/spf13/jwalterweatherman"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
@@ -315,15 +315,28 @@ func main() {
 
 // Updates all articles if pathToArticle is left empty.
 func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, showDiff, dryRun bool, apiKey string) error {
-	conf, err := loadHugoConfig(rootDir)
+	configs, err := loadHugoConfig(rootDir)
 	if err != nil {
 		return err
 	}
 
+	if rootDir == "." {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("getting current working directory: %w", err)
+		}
+		rootDir = cwd
+	}
+
+	log.Printf("with workingDir %s and publishDir %s", rootDir, filepath.Join(rootDir, "public"))
+	configProvider := config.New()
+	configProvider.Set("workingDir", rootDir)
+	configProvider.Set("publishDir", filepath.Join(rootDir, "public"))
+
 	sites, err := hugolib.NewHugoSites(deps.DepsCfg{
-		Logger: loggers.NewBasicLogger(jwalterweatherman.LevelTrace),
-		Fs:     hugofs.NewDefault(conf),
-		Cfg:    conf,
+		LogLevel: logg.LevelWarn,
+		Fs:       hugofs.NewDefault(configProvider),
+		Configs:  configs,
 	})
 	if err != nil {
 		return fmt.Errorf("Error creating sites: %w", err)
@@ -672,7 +685,7 @@ func PrintDevtoArticles(apiKey string) error {
 	return nil
 }
 
-func loadHugoConfig(root string) (config.Provider, error) {
+func loadHugoConfig(root string) (*allconfig.Configs, error) {
 	if !filepath.IsAbs(root) {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -681,18 +694,18 @@ func loadHugoConfig(root string) (config.Provider, error) {
 		root = filepath.Join(cwd, root)
 	}
 
-	config, _, err := hugolib.LoadConfig(hugolib.ConfigSourceDescriptor{
-		Fs:         hugofs.Os,
-		WorkingDir: root,
-		Filename:   filepath.Join(root, "config.yaml"),
+	configs, err := allconfig.LoadConfig(allconfig.ConfigSourceDescriptor{
+		Fs:       hugofs.Os,
+		Filename: filepath.Join(root, "config.yaml"),
 	})
+
 	if err != nil {
 		return nil, err
 	}
 
-	config.Set("workingDir", root)
+	// config.Set("workingDir", root)
 
-	return config, nil
+	return configs, nil
 }
 
 func isNotFound(err error) bool {
