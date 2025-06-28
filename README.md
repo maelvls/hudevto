@@ -5,9 +5,10 @@
 **Content:**
 
 - [Install](#install)
-- [Usage](#usage)
 - [Use it](#use-it)
   - [Step 1: Configure Devto with your blog's RSS feed](#step-1-configure-devto-with-your-blogs-rss-feed)
+  - [Step 2: Add `devtoId` and `devtoPublished` to page's front matter](#step-2-add-devtoid-and-devtopublished-to-pages-front-matter)
+  - [Step 3: push](#step-3-push)
   - [Transformations](#transformations)
   - [Features](#features)
     - [Preview and diff changes](#preview-and-diff-changes)
@@ -21,103 +22,6 @@
 ```sh
 # Requirement: Go is installed and $(go env GOPATH)/bin is in your PATH.
 go install github.com/maelvls/hudevto@latest
-```
-
-## Usage
-
-```bash
-% hudevto help
-hudevto allows you to synchronize your Hugo posts with your DEV articles. The
-synchronization is one way (Hugo to DEV). A Hugo post is only pushed when a
-change is detected. When pushed to DEV, the Hugo article is transformed a bit,
-e.g., relative image links are absolutified (see TRANSFORMATIONS).
-
-COMMANDS
-
-  hudevto status [POST]
-      Shows the status of each post (or of a single post). The status shows
-      whether it is mapped to a DEV article and if a push is required when the
-      Hugo post has changes that are not on DEV yet.
-
-  hudevto preview [POST]
-      Displays a Markdown preview of the Hugo post that has been converted into
-      the DEV article Markdown format. You can use this command to check that
-      the tranformations were correctly applied.
-
-  hudevto diff [POST]
-      Displays a diff between the Hugo post and the DEV article. It is useful
-      when you want to see what changes will be pushed.
-
-  hudevto push [POST]
-      Pushes the given Hugo Markdown post to DEV. If no post is given, then
-      all posts are pushed.
-
-  hudevto devto list
-      Lists all the articles you have on your DEV account.
-
-IMPORTANT
-
-hudevto has been mainly built for pushing https://maelvls.dev, and the following
-assumptions are made:
-
-1. Each blog post is in its own folder and the article itself is in index.md,
-   e.g. ./content/post-1/index.md.
-2. The images are hosted along with the index.md file.
-3. The base_url is set in config.yml.
-4. Each article has the "url" field set in its front-matter.
-
-HOW TO USE IT
-
-In order to operate, hudevto requires you to have your DEV account configured
-with "Publish to DEV Community from your blog's RSS". You can configure that at
-https://dev.to/settings/extensions. DEV will create a draft article for
-every Hugo post that you have published on your blog. For example, Let us
-imagine that your Hugo blog layout is:
-
-    .
-    └── content
-       ├── brick-chest.md
-       ├── cloth-impossible.md
-       └── powder-farmer.md
-
-After configuring the RSS feed of your blog at https://maelvls.dev/index.xml,
-DEV should create one draft article per post. You can check that these articles
-have been created on DEV with:
-
-    % hudevto devto list
-    386001: unpublished at https://dev.to/maelvls/brick-chest/edit
-    386002: unpublished at https://dev.to/maelvls/cloth-impossible/edit
-    386003: unpublished at https://dev.to/maelvls/powder-farmer/edit
-
-The next step is to map each article that you want to sync to DEV. Let us see
-the state of the mapping:
-
-    % hudevto status
-    error: ./content/brick-chest.md: missing devtoId field in front matter, might be 386001: https://dev.to/maelvls/brick-chest/edit
-    error: ./content/cloth-impossible.md: missing devtoId field in front matter, might be 386002: https://dev.to/maelvls/cloth-impossible/edit
-    error: ./content/powder-farmer.md: missing devtoId field in front matter, might be 386003: https://dev.to/maelvls/powder-farmer/edit
-
-At this point, you need to open each of your Hugo post and add some fields to
-their front matters. For example, in ./content/brick-chest.md, we add this:
-
-    devtoId: 386001       # This is the DEV ID as seen in hudevto devto list
-    devtoPublished: true  # When false, the DEV article will stay a draft
-    devtoSkip: false      # When true, hudevto will ignore this post.
-
-The status should have changed:
-
-    % hudevto status
-    info: ./content/brick-chest.md will be pushed published to https://dev.to/maelvls/brick-chest/edit
-    info: ./content/cloth-impossible.md will be pushed published to https://dev.to/maelvls/cloth-impossible/edit
-    info: ./content/powder-farmer.md will be pushed published to https://dev.to/maelvls/powder-farmer/edit
-
-Finally, you can push to DEV:
-
-    % hudevto push
-    success: ./content/brick-chest.md pushed to https://dev.to/maelvls/brick-chest-2588
-    success: ./content/cloth-impossible.md pushed to https://dev.to/maelvls/cloth-impossible-95dc
-    success: ./content/powder-farmer.md pushed to https://dev.to/maelvls/powder-farmer-6a18
-
 ```
 
 ## Use it
@@ -155,6 +59,8 @@ $ hudevto devto list
 365846: unpublished at https://dev.to/maelvls/brick-chest-temp-slug-3687644/edit (Brick Chest)
 365847: unpublished at https://dev.to/maelvls/powder-farmer-temp-slug-8753044/edit (Powder Farmer)
 ```
+
+### Step 2: Add `devtoId` and `devtoPublished` to page's front matter
 
 Now, run `status` to see what you need to do next:
 
@@ -195,6 +101,8 @@ Now, run `hudevto status` again:
 info: content/brick-chest.md will be pushed published to https://dev.to/maelvls/brick-chest/edit (devtoId: 365846, devtoPublished: true)
 info: content/powder-farmer/index.md will be pushed published to https://dev.to/maelvls/powder-farmer/edit (devtoId: 365847, devtoPublished: true)
 ```
+
+### Step 3: push
 
 Finally, you can push:
 
