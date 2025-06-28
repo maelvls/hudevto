@@ -7,10 +7,11 @@
 - [Install](#install)
 - [Usage](#usage)
 - [Use it](#use-it)
-  - [List your dev.to articles](#list-your-devto-articles)
+  - [Step 1: Configure Devto with your blog's RSS feed](#step-1-configure-devto-with-your-blogs-rss-feed)
   - [Transformations](#transformations)
-  - [Push one blog post to dev.to](#push-one-blog-post-to-devto)
-  - [Push all blog posts to dev.to](#push-all-blog-posts-to-devto)
+  - [Features](#features)
+    - [Preview and diff changes](#preview-and-diff-changes)
+    - [List your dev.to articles](#list-your-devto-articles)
 - [Notes](#notes)
   - [Hugo's hard breaks versus dev.to hard breaks](#hugos-hard-breaks-versus-devto-hard-breaks)
   - [Known errors](#known-errors)
@@ -128,22 +129,93 @@ environment variable:
 export DEVTO_APIKEY=$(lpass show dev.to -p)
 ```
 
-### List your dev.to articles
+### Step 1: Configure Devto with your blog's RSS feed
 
-This is useful because I have dev.to configured with the RSS feed of my blog so
-that dev.to automatically creates a draft of each of my new posts. Note that you
-don't need to set up RSS mirroring in order to use `hudevto`.
+In order to operate, hudevto requires you to have your Devto account configured
+with **Publish to DEV Community from your blog's RSS**. You can configure that
+at <https://dev.to/settings/extensions>. Devto will create a draft article for
+every Hugo post that you have published on your blog. For example, my RSS feed
+is at <https://maelvls.dev/index.xml>, so I configured Devto to automatically
+create a draft article for each of my posts.
+
+For example, let's imagine that your Hugo blog has two articles:
+
+```text
+.
+└── content
+   ├── brick-chest.md
+   └── powder-farmer
+       └── index.md
+```
+
+Now, check that Devto has created the draft articles for each of your posts:
+
+```console
+$ hudevto devto list
+365846: unpublished at https://dev.to/maelvls/brick-chest-temp-slug-3687644/edit (Brick Chest)
+365847: unpublished at https://dev.to/maelvls/powder-farmer-temp-slug-8753044/edit (Powder Farmer)
+```
+
+Now, run `status` to see what you need to do next:
+
+```console
+error: content/brick-chest.md missing devtoId field in front matter, might be 365846: https://dev.to/maelvls/brick-chest-temp-slug-3687644/edit
+error: content/powder-farmer/index.md missing devtoId field in front matter, might be 365847: https://dev.to/maelvls/powder-farmer-temp-slug-8753044/edit
+```
+
+Add the `devtoId` field to the front matter of each of your posts. For example,
+open `./content/brick-chest.md` and add `devtoId: 365846` to the front matter:
+
+```diff
+ title: "Brick Chest: A game about building a chest with bricks"
++devtoId: 365846
+ ---
+```
+
+Run `hudevto status` again to see the status of your posts:
+
+```console
+$ hudevto status
+error: content/brick-chest.md: missing devtoPublished field
+error: content/powder-farmer/index.md: missing devtoPublished field
+```
+
+Now, you need to add the `devtoPublished` field to the front matter of each
+post. For example, in `./content/brick-chest.md`, add `devtoPublished: true`:
+
+```diff
+ title: "Brick Chest: A game about building a chest with bricks"
+ devtoId: 365846
++devtoPublished: true
+```
+
+Now, run `hudevto status` again:
+
+```console
+info: content/brick-chest.md will be pushed published to https://dev.to/maelvls/brick-chest/edit (devtoId: 365846, devtoPublished: true)
+info: content/powder-farmer/index.md will be pushed published to https://dev.to/maelvls/powder-farmer/edit (devtoId: 365847, devtoPublished: true)
+```
+
+Finally, you can push:
 
 ```sh
-% hudevto devto list
-410260: unpublished at https://dev.to/maelvls/it-s-always-the-dns-fault-3lg3-temp-slug-8953915/edit (It's always the DNS' fault)
-365847: unpublished at https://dev.to/maelvls/stuff-about-wireshark-28c-temp-slug-8030102/edit (Stuff about Wireshark)
-365846: unpublished at https://dev.to/maelvls/how-client-server-ssh-authentication-works-5e7-temp-slug-7868012/edit (How client-server SSH authentication works)
-313908: unpublished at https://dev.to/maelvls/about-3896-temp-slug-7318594/edit (About)
-365849: published at https://dev.to/maelvls/epic-journey-with-statically-and-dynamically-linked-libraries-a-so-1khn (Epic journey with statically and dynamically-linked libraries (.a, .so))
-331169: published at https://dev.to/maelvls/github-actions-with-a-private-terraform-module-5b85 (Github Actions with a private Terraform module)
-317339: published at https://dev.to/maelvls/learning-kubernetes-controllers-496j (Learning Kubernetes Controllers)
+hudevto push
 ```
+
+> [!NOTE]
+>
+> You can also use `devtoSkip: true` if you want `hudevto` to skip a given post.
+>
+> Here is the documentation for the front matter fields that `hudevto` knows
+> about:
+>
+> ```yaml
+> devtoId: 386001       # This is the Devto ID as seen in hudevto devto list.
+> devtoSkip: false      # When true, hudevto will ignore this post.
+> devtoPublished: true  # When false, the DEV article will stay a draft.
+> devtoDraft: true      # When true, the post will be pushed as a draft.
+> devtoUrl: https://... # Set by hudevto.
+> ```
 
 ### Transformations
 
@@ -275,51 +347,49 @@ Here are the transformations that are made:
   [`go get -u` vs. `go.mod` (= _*Problem*_)](#-raw-go-get-u-endraw-vs-raw-gomod-endraw-problem)
   ```
 
-**Note:** that Hugo uses soft breaks for new lines as per the CommonMark
-spec, but dev.to uses the "Markdown Here" conventions which use a hard
-break on new lines; to work around that, see the below
-[section](#hugos-hard-breaks-versus-devto-hard-breaks).
+> [!NOTE]
+>
+> Hugo uses soft breaks for new lines as per the CommonMark spec, but dev.to
+> uses the "Markdown Here" conventions which use a hard break on new lines; to
+> work around that, see the below
+> [section](#hugos-hard-breaks-versus-devto-hard-breaks).
+
+### Features
+
+#### Preview and diff changes
+
+You can look at all the changes that will be pushed to dev.to:
 
 ```sh
-% hudevto preview ./content/2020/avoid-gke-lb-using-hostport/index.md
----
-title: "Avoid GKE's expensive load balancer by using hostPort"
-description: "I want to avoid using the expensive Google Network Load Balancer and instead do the load balancing in-cluster using akrobateo, which acts as a LoadBalancer controller."
-published: true
-tags: ""
-date: 20200120T00:00Z
-series: ""
-canonical_url: "https://maelvls.dev/avoid-gke-lb-with-hostport/"
-cover_image: "https://maelvls.dev/avoid-gke-lb-with-hostport/cover-external-dns.png"
----
-
-> **⚠️ Update 25 April 2020**: Akrobateo has been EOL in January 2020 due to the company going out of business. Their blog post regarding the EOL isn't available anymore and was probably shut down. Fortunately, the Wayback Machine [has a snapshot of the post](https://web.archive.org/web/20200107111252/https://blog.kontena.io/farewell/) (7th January 2020). Here is an excerpt:
->
-> > This is a sad day for team Kontena. We tried to build something amazing but our plans of creating business around open source software has failed. We couldn't build a sustainable business. Despite all the effort, highs and lows, as of today, Kontena has ceased operations. The team is no more and the official support for Kontena products is no more available.
->
-> This is so sad... 😢 Note that the Github repo [kontena/akrobateo](https://github.com/kontena/akrobateo) is still there (and has not been archived yet), but their Docker registry has been shut down which means most of this post is broken.
-
-In my spare time, I maintain a tiny "playground" Kubernetes cluster on [GKE](https://cloud.google.com/kubernetes-engine) (helm charts [here](https://github.com/maelvls/k.maelvls.dev)). I quickly realized that realized using `Service type=LoadBalancer` in GKE was spawning a _[Network Load Balancer](https://cloud.google.com/load-balancing/docs/network)_ which costs approximately **\$15 per month**! In this post, I present a way of avoiding the expensive Google Network Load Balancer by load balancing in-cluster using akrobateo, which acts as a Service type=LoadBalancer controller.
+hudevto diff
 ```
 
-### Push one blog post to dev.to
+If you want to render the Markdown file that will be pushed to dev.to, you can
+use the `preview` command:
 
 ```sh
-% hudevto push ./content/2020/avoid-gke-lb-using-hostport/index.md
-success: ./content/2020/avoid-gke-lb-using-hostport/index.md pushed published to https://dev.to/maelvls/avoid-gke-s-expensive-load-balancer-by-using-hostport-2ab9 (devtoId: 241275, devtoPublished: true)
+hudevto preview ./content/2020/avoid-gke-lb-using-hostport/index.md
 ```
 
-### Push all blog posts to dev.to
+#### List your dev.to articles
 
 ```sh
-% hudevto push
-success: ./content/notes/dns.md pushed unpublished to https://dev.to/maelvls/it-s-always-the-dns-fault-3lg3-temp-slug-8953915/edit (devtoId: 410260, devtoPublished: false)
-success: ./content/2020/deployment-available-condition/index.md pushed published to https://dev.to/maelvls/understanding-the-available-condition-of-a-kubernetes-deployment-51li (devtoId: 386691, devtoPublished: true)
-success: ./content/2020/docker-proxy-registry-kind/index.md pushed published to https://dev.to/maelvls/pull-through-docker-registry-on-kind-clusters-cpo (devtoId: 410837, devtoPublished: true)
-success: ./content/2020/mitmproxy-kubectl/index.md pushed published to https://dev.to/maelvls/using-mitmproxy-to-understand-what-kubectl-does-under-the-hood-36om (devtoId: 377876, devtoPublished: true)
-success: ./content/2020/static-libraries-and-autoconf-hell/index.md pushed published to https://dev.to/maelvls/epic-journey-with-statically-and-dynamically-linked-libraries-a-so-1khn (devtoId: 365849, devtoPublished: true)
-success: ./content/2020/gh-actions-with-tf-private-repo/index.md pushed published to https://dev.to/maelvls/github-actions-with-a-private-terraform-module-5b85 (devtoId: 331169, devtoPublished: true)
-...
+hudevto devto list
+```
+
+This is useful because I have dev.to configured with the RSS feed of my blog so
+that dev.to automatically creates a draft of each of my new posts. Note that you
+don't need to set up RSS mirroring in order to use `hudevto`.
+
+```console
+$ hudevto devto list
+410260: unpublished at https://dev.to/maelvls/it-s-always-the-dns-fault-3lg3-temp-slug-8953915/edit (It's always the DNS' fault)
+365847: unpublished at https://dev.to/maelvls/stuff-about-wireshark-28c-temp-slug-8030102/edit (Stuff about Wireshark)
+365846: unpublished at https://dev.to/maelvls/how-client-server-ssh-authentication-works-5e7-temp-slug-7868012/edit (How client-server SSH authentication works)
+313908: unpublished at https://dev.to/maelvls/about-3896-temp-slug-7318594/edit (About)
+365849: published at https://dev.to/maelvls/epic-journey-with-statically-and-dynamically-linked-libraries-a-so-1khn (Epic journey with statically and dynamically-linked libraries (.a, .so))
+331169: published at https://dev.to/maelvls/github-actions-with-a-private-terraform-module-5b85 (Github Actions with a private Terraform module)
+317339: published at https://dev.to/maelvls/learning-kubernetes-controllers-496j (Learning Kubernetes Controllers)
 ```
 
 ## Notes

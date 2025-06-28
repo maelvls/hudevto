@@ -59,7 +59,7 @@ func mainCmd() *cobra.Command {
 			e.g., relative image links are absolutified.
 
 			For more information about the transformation, see:
-			    https://github.com/maelvls/hudevto/blob/main/README.md
+				https://github.com/maelvls/hudevto/blob/main/README.md
 		`),
 	}
 	cmd.PersistentFlags().StringVar(&rootDir, "root", "", "Root directory of the Hugo project.")
@@ -76,8 +76,8 @@ func statusCmd() *cobra.Command {
 		Short: "Show the status of each post (or a single post)",
 		Long: undent.Undent(`
 			Shows the status of each post (or of a single post). The status shows
-      		whether it is mapped to a DEV article and if a push is required when the
-      		Hugo post has changes that are not on DEV yet.
+			whether it is mapped to a DEV article and if a push is required when the
+			Hugo post has changes that are not on DEV yet.
 		`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -168,8 +168,8 @@ func diffCmd() *cobra.Command {
 		Use:   "diff [POST]",
 		Short: "Display a diff between the Hugo post and the DEV article.",
 		Long: undent.Undent(`
-		 	Displays a diff between the Hugo post and the DEV article. It is useful
-      		when you want to see what changes will be pushed.
+			Displays a diff between the Hugo post and the DEV article. It is useful
+			when you want to see what changes will be pushed.
 		`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -243,11 +243,11 @@ func getApiKey(cmd *cobra.Command) (string, error) {
 // Updates all articles if pathToArticle is left empty. The pathToArticle must
 // be a markdown file, i.e., *.md. The rootDir cannot be left empty; if you want
 // to use the current working directory, use ".".
-func PushArticlesFromHugoToDevto(rootDirOrEmpty, relPathToArticle string, showMarkdown, showDiff, dryRun bool, apiKey string) error {
-	if rootDirOrEmpty == "" {
+func PushArticlesFromHugoToDevto(rootDirOrDot, relPathToArticle string, showMarkdown, showDiff, dryRun bool, apiKey string) error {
+	if rootDirOrDot == "" {
 		panic("programmer mistake: PushArticlesFromHugoToDevto: rootDirOrEmpty cannot be empty")
 	}
-	rootDir := filepath.Clean(rootDirOrEmpty)
+	rootDir := filepath.Clean(rootDirOrDot)
 	if rootDir == "." {
 		var err error
 		rootDir, err = os.Getwd()
@@ -255,7 +255,7 @@ func PushArticlesFromHugoToDevto(rootDirOrEmpty, relPathToArticle string, showMa
 			return fmt.Errorf("while getting current working directory: %w", err)
 		}
 	}
-	logutil.Debugf("using rootDir='%s', rootDirOrEmpty='%s'", logutil.Gray(rootDir), logutil.Gray(rootDirOrEmpty))
+	logutil.Debugf("using rootDir='%s', rootDirOrEmpty='%s'", logutil.Gray(rootDir), logutil.Gray(rootDirOrDot))
 
 	fs := hugofs.NewBasePathFs(hugofs.Os, rootDir)
 	configs, err := allconfig.LoadConfig(allconfig.ConfigSourceDescriptor{
@@ -315,7 +315,7 @@ func PushArticlesFromHugoToDevto(rootDirOrEmpty, relPathToArticle string, showMa
 	if relPathToArticle != "" {
 		p := sites.GetContentPage("/" + relPathToArticle)
 		if p == nil {
-			return fmt.Errorf("not found: %s", path.Join(rootDirOrEmpty, logutil.Gray(relPathToArticle)))
+			return fmt.Errorf("not found: %s", path.Join(rootDirOrDot, logutil.Gray(relPathToArticle)))
 		}
 
 		pages = []page.Page{p}
@@ -326,12 +326,17 @@ func PushArticlesFromHugoToDevto(rootDirOrEmpty, relPathToArticle string, showMa
 			continue
 		}
 
-		pathToMD := rootDirOrEmpty + "/content" + page.Path()
-
-		// The pathToMD might either be an .md file or a folder, so we need to
-		// find the index.md file if it's a folder.
-		if filepath.Ext(pathToMD) == "" {
-			pathToMD = filepath.Join(pathToMD, "index.md")
+		// The pathToMD might either be:
+		//  - article.md             -> a markdown file
+		//  - article/index.md       -> a folder containing an index.md file
+		// Let's find which one it is.
+		pathToMD, err := pagePathToFilePath(rootDirOrDot, page.Path())
+		if err != nil {
+			logutil.Errorf("while getting path to MD for %s: %v",
+				logutil.Gray(page.Path()),
+				err,
+			)
+			continue
 		}
 
 		draft := true
@@ -986,4 +991,46 @@ func errWorkDirTooShort(err error) bool {
 	}
 
 	return false
+}
+
+// This is meant to turn the URL path returned by Hugo's page.Path() into a file
+// path to the Markdown file of the page. For example, if the page.Path() is
+//
+//	article
+//
+// then the file path might either be:
+//
+//	(1) A markdown file:                  content/article.md
+//	(2) A folder containing index.md:    content/article/index.md
+//
+// This func returns the file path out of the URL path. The rootDir cannot be
+// empty; to use the current dir, usr ".".
+func pagePathToFilePath(rootDir, hugoPath string) (string, error) {
+	// Case (1): the hugoPath is a file, so we return the file path.
+	pathIsMD := filepath.Join(rootDir, "content", hugoPath+".md")
+	_, err := os.Stat(pathIsMD)
+	if err == nil {
+		return pathIsMD, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", fmt.Errorf("while checking if %s exists: %w", pathIsMD, err)
+	}
+
+	// At this point, we know that it's not (2), so it must be (1).
+	pathIsIndexMD := filepath.Join(rootDir, "content", hugoPath, "index.md")
+	_, err = os.Stat(pathIsIndexMD)
+	if err == nil {
+		return pathIsIndexMD, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", fmt.Errorf("while checking if %s exists: %w", pathIsIndexMD, err)
+	}
+
+	return "", fmt.Errorf("wasn't able to find the source file for the URL path %s, tried:\n"+
+		"  - as a Markdown file (%s)\n"+
+		"  - as an index file (%s)",
+		hugoPath,
+		logutil.Gray(pathIsMD),
+		logutil.Gray(pathIsIndexMD),
+	)
 }
