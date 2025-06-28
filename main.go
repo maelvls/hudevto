@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -259,6 +260,12 @@ func main() {
 		logutil.Errorf("no API key given, either give it with --apikey or with DEVTO_APIKEY")
 	}
 
+	_, err := os.Getwd()
+	if err != nil {
+		logutil.Errorf("while getting current working directory: %s", err)
+		os.Exit(1)
+	}
+
 	if *rootDir != "" {
 		err := os.Chdir(*rootDir)
 		if err != nil {
@@ -266,28 +273,32 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	pathToArticle := flag.Arg(1) // May be empty.
+	if strings.HasPrefix(pathToArticle, *rootDir) {
+		pathToArticle = strings.TrimPrefix(pathToArticle, *rootDir+string(filepath.Separator))
+	}
 
 	switch flag.Arg(0) {
 	case "push":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), false, false, false, apiKey)
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), pathToArticle, false, false, false, apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
 		}
 	case "preview":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), true, false, true, apiKey)
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), pathToArticle, true, false, true, apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
 		}
 	case "diff":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), false, true, true, apiKey)
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), pathToArticle, false, true, true, apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
 		}
 	case "status":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), false, false, true, apiKey)
+		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), pathToArticle, false, false, true, apiKey)
 		if err != nil {
 			logutil.Errorf(err.Error())
 			os.Exit(1)
@@ -320,20 +331,26 @@ func main() {
 	}
 }
 
-// Updates all articles if pathToArticle is left empty.
-func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, showDiff, dryRun bool, apiKey string) error {
-	if !filepath.IsAbs(rootDir) {
-		cwd, err := os.Getwd()
+// Updates all articles if pathToArticle is left empty. The pathToArticle must
+// be a markdown file, i.e., *.md. The rootDir cannot be left empty; if you want
+// to use the current working directory, use ".".
+func PushArticlesFromHugoToDevto(rootDirOrEmpty, relPathToArticle string, showMarkdown, showDiff, dryRun bool, apiKey string) error {
+	if rootDirOrEmpty == "" {
+		panic("programmer mistake: PushArticlesFromHugoToDevto: rootDirOrEmpty cannot be empty")
+	}
+	rootDir := filepath.Clean(rootDirOrEmpty)
+	if rootDir == "." {
+		var err error
+		rootDir, err = os.Getwd()
 		if err != nil {
 			return fmt.Errorf("while getting current working directory: %w", err)
 		}
-		rootDir = filepath.Join(cwd, rootDir)
 	}
+	logutil.Debugf("using rootDir='%s', rootDirOrEmpty='%s'", logutil.Gray(rootDir), logutil.Gray(rootDirOrEmpty))
 
 	configs, err := allconfig.LoadConfig(allconfig.ConfigSourceDescriptor{
 		Fs:       hugofs.Os,
 		Filename: filepath.Join(rootDir, "config.yaml"),
-		// IgnoreModuleDoesNotExist: true,
 	})
 	if err != nil {
 		return fmt.Errorf("while loading config: %w", err)
@@ -343,6 +360,11 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 	configProvider.Set("workingDir", rootDir)
 	configProvider.Set("publishDir", "unused")
 	configProvider.Set("themesDir", filepath.Join(rootDir, "themes"))
+
+	if len(rootDir) < 2 {
+		return fmt.Errorf("the root directory '%s' is too short", rootDir)
+	}
+
 	sites, err := hugolib.NewHugoSites(deps.DepsCfg{
 		Fs:      hugofs.NewFromSourceAndDestination(hugofs.Os, hugofs.Os, configProvider),
 		Configs: configs,
@@ -384,14 +406,14 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 	}
 
 	pages := sites.Pages()
-	if pathToArticle != "" {
-		path := sites.AbsPathify(pathToArticle)
-		if path == "" {
-			return fmt.Errorf("%s not found", logutil.Gray(pathToArticle))
+	if relPathToArticle != "" {
+		pathArt := sites.AbsPathify(relPathToArticle)
+		if pathArt == "" {
+			return fmt.Errorf("%s not found", path.Join(rootDirOrEmpty, logutil.Gray(relPathToArticle)))
 		}
-		p := sites.GetContentPage(path)
+		p := sites.GetContentPage(pathArt)
 		if p == nil {
-			return fmt.Errorf("%s was found but does not seem to be a page", logutil.Gray(pathToArticle))
+			return fmt.Errorf("%s was found but does not seem to be a page", path.Join(rootDirOrEmpty, logutil.Gray(relPathToArticle)))
 		}
 
 		pages = []page.Page{p}
@@ -402,7 +424,13 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 			continue
 		}
 
-		pathToMD := rootDir + "/content" + page.Path()
+		pathToMD := rootDirOrEmpty + "/content" + page.Path()
+
+		// The pathToMD might either be an .md file or a folder, so we need to
+		// find the index.md file if it's a folder.
+		if filepath.Ext(pathToMD) == "" {
+			pathToMD = filepath.Join(pathToMD, "index.md")
+		}
 
 		draft := true
 		draftRaw, err := page.Param("draft")
@@ -427,7 +455,7 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 			}
 		}
 		if devtoSkip {
-			logutil.Infof("%s: field devtoSkip is true, skipping this post.",
+			logutil.Debugf("%s: field devtoSkip is true, skipping this post.",
 				logutil.Gray(pathToMD),
 			)
 			continue
@@ -631,13 +659,7 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 			continue
 		}
 
-		// After a successful update, add the devtoUrl to the front matter. The
-		// pathToMD might either be an .md file or a folder, so we need to find
-		// the index.md file if it's a folder.
-		if filepath.Ext(pathToMD) == "" {
-			pathToMD = filepath.Join(pathToMD, "index.md")
-		}
-
+		// After a successful update, add the devtoUrl to the front matter.
 		if err := addDevtoUrlToFrontMatter(pathToMD, art.URL.String()); err != nil {
 			logutil.Errorf("%s: failed to update front matter with devtoUrl: %s",
 				logutil.Gray(pathToMD),
@@ -1051,4 +1073,15 @@ func addDevtoUrlToFrontMatter(filePath string, url string) error {
 	updatedFrontMatter := fmt.Sprintf("%s\ndevtoUrl: %s", frontMatter, url)
 	updatedContent := frontMatterRegex.ReplaceAllString(contentStr, fmt.Sprintf("---\n%s\n---", updatedFrontMatter))
 	return os.WriteFile(filePath, []byte(updatedContent), 0644)
+}
+
+func errWorkDirTooShort(err error) bool {
+	if err == nil {
+		return false
+	}
+	if strings.Contains(err.Error(), "workingDir is too short") {
+		return true
+	}
+
+	return false
 }
