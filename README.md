@@ -19,7 +19,7 @@
 
 ```sh
 # Requirement: Go is installed and $(go env GOPATH)/bin is in your PATH.
-(cd && GO111MODULE=on go get github.com/maelvls/hudevto@latest)
+go install github.com/maelvls/hudevto@latest
 ```
 
 ## Usage
