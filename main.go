@@ -21,7 +21,6 @@ import (
 
 	"github.com/MakeNowJust/heredoc"
 	"github.com/VictorAvelar/devto-api-go/devto"
-	"github.com/bep/logg"
 	"github.com/gohugoio/hugo/config"
 	"github.com/gohugoio/hugo/config/allconfig"
 	"github.com/gohugoio/hugo/deps"
@@ -260,6 +259,14 @@ func main() {
 		logutil.Errorf("no API key given, either give it with --apikey or with DEVTO_APIKEY")
 	}
 
+	if *rootDir != "" {
+		err := os.Chdir(*rootDir)
+		if err != nil {
+			logutil.Errorf("while changing directory to %s: %s", *rootDir, err)
+			os.Exit(1)
+		}
+	}
+
 	switch flag.Arg(0) {
 	case "push":
 		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), flag.Arg(1), false, false, false, apiKey)
@@ -315,36 +322,38 @@ func main() {
 
 // Updates all articles if pathToArticle is left empty.
 func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, showDiff, dryRun bool, apiKey string) error {
-	configs, err := loadHugoConfig(rootDir)
-	if err != nil {
-		return err
-	}
-
-	if rootDir == "." {
+	if !filepath.IsAbs(rootDir) {
 		cwd, err := os.Getwd()
 		if err != nil {
-			return fmt.Errorf("getting current working directory: %w", err)
+			return fmt.Errorf("while getting current working directory: %w", err)
 		}
-		rootDir = cwd
+		rootDir = filepath.Join(cwd, rootDir)
 	}
 
-	log.Printf("with workingDir %s and publishDir %s", rootDir, filepath.Join(rootDir, "public"))
-	configProvider := config.New()
-	configProvider.Set("workingDir", rootDir)
-	configProvider.Set("publishDir", filepath.Join(rootDir, "public"))
-
-	sites, err := hugolib.NewHugoSites(deps.DepsCfg{
-		LogLevel: logg.LevelWarn,
-		Fs:       hugofs.NewDefault(configProvider),
-		Configs:  configs,
+	configs, err := allconfig.LoadConfig(allconfig.ConfigSourceDescriptor{
+		Fs:       hugofs.Os,
+		Filename: filepath.Join(rootDir, "config.yaml"),
+		// IgnoreModuleDoesNotExist: true,
 	})
 	if err != nil {
-		return fmt.Errorf("Error creating sites: %w", err)
+		return fmt.Errorf("while loading config: %w", err)
+	}
+
+	configProvider := config.New()
+	configProvider.Set("workingDir", rootDir)
+	configProvider.Set("publishDir", "unused")
+	configProvider.Set("themesDir", filepath.Join(rootDir, "themes"))
+	sites, err := hugolib.NewHugoSites(deps.DepsCfg{
+		Fs:      hugofs.NewFromSourceAndDestination(hugofs.Os, hugofs.Os, configProvider),
+		Configs: configs,
+	})
+	if err != nil {
+		return fmt.Errorf("while creating sites: %w", err)
 	}
 
 	err = sites.Build(hugolib.BuildCfg{SkipRender: true})
 	if err != nil {
-		return fmt.Errorf("Error Processing Source Content: %w", err)
+		return fmt.Errorf("while processing content: %w", err)
 	}
 
 	if len(sites.Pages()) == 0 {
@@ -393,7 +402,7 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 			continue
 		}
 
-		pathToMD := rootDir + "/content/" + page.Path()
+		pathToMD := rootDir + "/content" + page.Path()
 
 		draft := true
 		draftRaw, err := page.Param("draft")
@@ -622,6 +631,20 @@ func PushArticlesFromHugoToDevto(rootDir, pathToArticle string, showMarkdown, sh
 			continue
 		}
 
+		// After a successful update, add the devtoUrl to the front matter. The
+		// pathToMD might either be an .md file or a folder, so we need to find
+		// the index.md file if it's a folder.
+		if filepath.Ext(pathToMD) == "" {
+			pathToMD = filepath.Join(pathToMD, "index.md")
+		}
+
+		if err := addDevtoUrlToFrontMatter(pathToMD, art.URL.String()); err != nil {
+			logutil.Errorf("%s: failed to update front matter with devtoUrl: %s",
+				logutil.Gray(pathToMD),
+				err,
+			)
+		}
+
 		publishedStr := logutil.Red("unpublished")
 		if devtoPublished {
 			publishedStr = logutil.Green("published")
@@ -683,29 +706,6 @@ func PrintDevtoArticles(apiKey string) error {
 	}
 
 	return nil
-}
-
-func loadHugoConfig(root string) (*allconfig.Configs, error) {
-	if !filepath.IsAbs(root) {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return nil, err
-		}
-		root = filepath.Join(cwd, root)
-	}
-
-	configs, err := allconfig.LoadConfig(allconfig.ConfigSourceDescriptor{
-		Fs:       hugofs.Os,
-		Filename: filepath.Join(root, "config.yaml"),
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	// config.Set("workingDir", root)
-
-	return configs, nil
 }
 
 func isNotFound(err error) bool {
@@ -1018,4 +1018,37 @@ func convertAnchorIDs(pathToMD, in string, sanitizeAnchorName func(s string) str
 		// Replace the anchor ID.
 		return strings.Replace(s, "#"+matches[2], "#"+heading, 1)
 	})
+}
+
+// addDevtoUrlToFrontMatter adds or updates the devtoUrl field in the front matter of a Markdown file
+func addDevtoUrlToFrontMatter(filePath string, url string) error {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("reading file: %w", err)
+	}
+
+	contentStr := string(content)
+
+	// Check if there's YAML front matter (between --- markers).
+	frontMatterRegex := regexp.MustCompile(`(?s)^---\n(.*?)\n---`)
+	match := frontMatterRegex.FindStringSubmatch(contentStr)
+	if len(match) < 2 {
+		return fmt.Errorf("front matter not found in %s", filePath)
+	}
+
+	frontMatter := match[1]
+
+	// Check if devtoUrl already exists
+	devtoUrlRegex := regexp.MustCompile(`(?m)^devtoUrl:\s*.*$`)
+	if devtoUrlRegex.MatchString(frontMatter) {
+		// Replace existing devtoUrl
+		updatedFrontMatter := devtoUrlRegex.ReplaceAllString(frontMatter, fmt.Sprintf("devtoUrl: %s", url))
+		updatedContent := frontMatterRegex.ReplaceAllString(contentStr, fmt.Sprintf("---\n%s\n---", updatedFrontMatter))
+		return os.WriteFile(filePath, []byte(updatedContent), 0644)
+	}
+
+	// Add new devtoUrl field
+	updatedFrontMatter := fmt.Sprintf("%s\ndevtoUrl: %s", frontMatter, url)
+	updatedContent := frontMatterRegex.ReplaceAllString(contentStr, fmt.Sprintf("---\n%s\n---", updatedFrontMatter))
+	return os.WriteFile(filePath, []byte(updatedContent), 0644)
 }
