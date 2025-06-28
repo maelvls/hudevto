@@ -8,7 +8,7 @@
 - [Usage](#usage)
 - [Use it](#use-it)
   - [List your dev.to articles](#list-your-devto-articles)
-  - [Preview the Markdown content that will be pushed to dev.to](#preview-the-markdown-content-that-will-be-pushed-to-devto)
+  - [Transformations](#transformations)
   - [Push one blog post to dev.to](#push-one-blog-post-to-devto)
   - [Push all blog posts to dev.to](#push-all-blog-posts-to-devto)
 - [Notes](#notes)
@@ -117,57 +117,6 @@ Finally, you can push to DEV:
     success: ./content/cloth-impossible.md pushed to https://dev.to/maelvls/cloth-impossible-95dc
     success: ./content/powder-farmer.md pushed to https://dev.to/maelvls/powder-farmer-6a18
 
-TRANSFORMATIONS
-The Markdown for Hugo posts and dev.to articles have slight differences.
-Before pushing to dev.to, hudevto does some transformations to the Markdown
-file. To see the transformations before pushing the Hugo post to dev.to, use one of:
-
-    % hudevto diff ./debug-k8s/index.md
-
-The transformations are:
-
-1. ABSOLUTE MARKDOWN IMAGES: the relative image links are absolutified since
-   dev.to needs the image path to be absolute (the base URL itself is not
-   required).
-
-   The following Hugo Markdown snippet:
-
-     ![wireshark](wireshark.png)
-
-    becomes:
-
-      ![wireshark](/debug-k8s/wireshark.png)
-                   &lt;--(1)--->
-
-    where (1) is the article's Hugo permalink to the ./debug-k8s/index.md post.
-    Note that the ![]() tag must span a single line. Otherwise, it won't be
-    transformed.
-
-2. ABSOLUTE HTML IMG TAGS: unlike with Markdown images, the <img> HTML tags
-   need to be absolute and needs to contain the base URL. For example, the
-   following HTML:
-
-        <img src="wireshark.png">
-
-    gets transformed to:
-
-        <img src="https://maelvls/debug-k8s/wireshark.png">
-
-    The <img> tag must be on a single line, and the "src" value must end with
-	one of the following extensions: png, PNG, jpeg, JPG, jpg, gif, GIF, svg,
-	SVG.
-
-3. SHORTCODES: Hugo shortcodes for embedding (like for embedding a Youtube video)
-   are turned into Liquid tags that dev.to knows about.
-4. ANCHOR IDS: Hugo and Devto have different anchor ID syntaxes.
-
-OPTIONS
-  -apikey string
-    	The API key for Dev.to. You can also set DEVTO_APIKEY instead.
-  -debug
-    	Print debug information such as the HTTP requests that are being made in curl format.
-  -root string
-    	Root directory of the Hugo project.
 ```
 
 ## Use it
@@ -181,8 +130,9 @@ export DEVTO_APIKEY=$(lpass show dev.to -p)
 
 ### List your dev.to articles
 
-This is useful because I have dev.to configured with the RSS feed of my
-blog so that dev.to automatically creates a draft of each of my new posts.
+This is useful because I have dev.to configured with the RSS feed of my blog so
+that dev.to automatically creates a draft of each of my new posts. Note that you
+don't need to set up RSS mirroring in order to use `hudevto`.
 
 ```sh
 % hudevto devto list
@@ -195,12 +145,24 @@ blog so that dev.to automatically creates a draft of each of my new posts.
 317339: published at https://dev.to/maelvls/learning-kubernetes-controllers-496j (Learning Kubernetes Controllers)
 ```
 
-### Preview the Markdown content that will be pushed to dev.to
+### Transformations
 
-I use the `hudevto preview` command because I do some transformations and I need a way to preview the changes to make sure the Markdown and front matter make sense. The transformations are:
+The Markdown for Hugo posts and dev.to articles have slight differences. Before
+pushing to dev.to, `hudevto` does some transformations to the Markdown file. To
+see the transformations before pushing the Hugo post to dev.to, you can use:
 
-- Generate a new front matter which is used by dev.to for setting the dev.to post title and canonical URL;
-- Change the Hugo "tags" into Liquid tags, such as:
+```sh
+hudevto preview ./content/2020/avoid-gke-lb-using-hostport/index.md
+hudevto diff ./content/2020/avoid-gke-lb-using-hostport/index.md
+```
+
+Here are the transformations that are made:
+
+- **Front matter:** Updates the Markdown front matter. The front matter is used
+  to configure the Devto post title and canonical URL.
+- **Shortcodes:** the Hugo shortcodes are transformed into shortcodes that
+  Devto knows about (called "Liquid tags"). For example, the following
+  Hugo shortcode:
 
   ```md
   {{< youtube 30a0WrfaS2A >}}
@@ -212,11 +174,12 @@ I use the `hudevto preview` command because I do some transformations and I need
   {% youtube 30a0WrfaS2A %}
   ```
 
-- Add the base URL of the post to the markdown images so that images are not
-  broken. ONLY WORKS if your images are stored along side your blog post, such
-  as:
+- **Absolute Markdown images:** Markdown image links are transformed to
+  absolute URLs using the base URL of the post. That way, images keep working
+  in Dev.to. ONLY WORKS if your images are stored along side your blog post,
+  such as:
 
-  ```sh
+  ```console
   % ls --tree ./content/2020/avoid-gke-lb-using-hostport
   ./content/2020/avoid-gke-lb-using-hostport
   ├── cost-load-balancer-gke.png
@@ -226,8 +189,9 @@ I use the `hudevto preview` command because I do some transformations and I need
   └── packet-routing-with-akrobateo.png
   ```
 
-- The relative image links are "absolutified". This is needed so that Devto can
-  access the images. For example, the following post:
+- **Absolute HTML `<img>` tags:** The relative image links are "absolutified".
+  This is needed so that Devto can access the images. For example, the following
+  post:
 
   <https://maelvls.dev/you-should-write-comments/index.md>
 
@@ -296,9 +260,10 @@ I use the `hudevto preview` command because I do some transformations and I need
   Only the following image extensions are converted: png, PNG, jpeg, JPG, jpg,
   gif, GIF, svg, SVG.
 
-- The GitHub-style anchor IDs are converted to Devto anchor IDs. This is because
-  GitHub-style anchor IDs, which is what Hugo produces, are different from the
-  ones produced by Devto. For example, take the following Markdown:
+- **Anchor IDs**: The GitHub-style anchor IDs are converted to Devto anchor IDs.
+  This is because GitHub-style anchor IDs, which is what Hugo produces, are
+  different from the ones produced by Devto. For example, take the following
+  Markdown:
 
   ```markdown
   [`go get -u` vs. `go.mod` (= _*Problem*_)](#go-get--u-vs-gomod--_problem_)

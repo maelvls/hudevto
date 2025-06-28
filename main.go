@@ -5,12 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
-	"html/template"
 	"io"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
 	"path"
@@ -22,313 +19,225 @@ import (
 
 	"github.com/MakeNowJust/heredoc"
 	"github.com/VictorAvelar/devto-api-go/devto"
+	"github.com/charmbracelet/fang"
 	"github.com/gohugoio/hugo/config"
 	"github.com/gohugoio/hugo/config/allconfig"
 	"github.com/gohugoio/hugo/deps"
 	"github.com/gohugoio/hugo/hugofs"
 	"github.com/gohugoio/hugo/hugolib"
 	"github.com/gohugoio/hugo/resources/page"
-	"github.com/mgutz/ansi"
 	"github.com/schollz/closestmatch"
 	"github.com/sethgrid/gencurl"
+	"github.com/spf13/cobra"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
 
 	"github.com/maelvls/hudevto/logutil"
-	"github.com/maelvls/hudevto/pager"
+	"github.com/maelvls/undent"
 )
-
-var (
-	rootDir    = flag.String("root", "", "Root directory of the Hugo project.")
-	apiKeyFlag = flag.String("apikey", "", "The API key for Dev.to. You can also set DEVTO_APIKEY instead.")
-	debug      = flag.Bool("debug", false, "Print debug information such as the HTTP requests that are being made in curl format.")
-)
-
-const usageErrMsg = `
-usage:
-  hudevto status [POST]
-  hudevto (preview|diff) [POST]
-  hudevto push [POST]
-  hudevto devto list
-  hudevto help
-
-{{- if .WithOptionsSection}}
-
-options:
-{{ end }}
-`
-
-const help = `
-{{- section "NAME" }}
-
-hudevto allows you to synchronize your Hugo posts with your DEV articles. The
-synchronization is one way (Hugo to DEV). A Hugo post is only pushed when a
-change is detected. When pushed to DEV, the Hugo article is transformed a bit,
-e.g., relative image links are absolutified (see TRANSFORMATIONS).
-
-{{ section "COMMANDS" }}
-
-  hudevto status [POST]
-      Shows the status of each post (or of a single post). The status shows
-      whether it is mapped to a DEV article and if a push is required when the
-      Hugo post has changes that are not on DEV yet.
-
-  hudevto preview [POST]
-      Displays a Markdown preview of the Hugo post that has been converted into
-      the DEV article Markdown format. You can use this command to check that
-      the tranformations were correctly applied.
-
-  hudevto diff [POST]
-      Displays a diff between the Hugo post and the DEV article. It is useful
-      when you want to see what changes will be pushed.
-
-  hudevto push [POST]
-      Pushes the given Hugo Markdown post to DEV. If no post is given, then
-      all posts are pushed.
-
-  hudevto devto list
-      Lists all the articles you have on your DEV account.
-
-{{ section "IMPORTANT" }}
-
-hudevto has been mainly built for pushing https://maelvls.dev, and the following
-assumptions are made:
-
-1. Each blog post is in its own folder and the article itself is in index.md,
-   e.g. ./content/post-1/index.md.
-2. The images are hosted along with the index.md file.
-3. The base_url is set in config.yml.
-4. Each article has the "url" field set in its front-matter.
-
-{{ section "HOW TO USE IT" }}
-
-In order to operate, hudevto requires you to have your DEV account configured
-with "Publish to DEV Community from your blog's RSS". You can configure that at
-{{ url "https://dev.to/settings/extensions" }}. DEV will create a draft article for
-every Hugo post that you have published on your blog. For example, Let us
-imagine that your Hugo blog layout is:
-
-    .
-    └── content
-       ├── brick-chest.md
-       ├── cloth-impossible.md
-       └── powder-farmer.md
-
-After configuring the RSS feed of your blog at {{ url "https://maelvls.dev/index.xml" }},
-DEV should create one draft article per post. You can check that these articles
-have been created on DEV with:
-
-    {{ cmd "hudevto devto list" }}
-    {{ out "386001: unpublished at https://dev.to/maelvls/brick-chest/edit" }}
-    {{ out "386002: unpublished at https://dev.to/maelvls/cloth-impossible/edit" }}
-    {{ out "386003: unpublished at https://dev.to/maelvls/powder-farmer/edit" }}
-
-The next step is to map each article that you want to sync to DEV. Let us see
-the state of the mapping:
-
-    {{ cmd "hudevto status" }}
-    {{ out "error: ./content/brick-chest.md: missing devtoId field in front matter, might be 386001: https://dev.to/maelvls/brick-chest/edit" }}
-    {{ out "error: ./content/cloth-impossible.md: missing devtoId field in front matter, might be 386002: https://dev.to/maelvls/cloth-impossible/edit" }}
-    {{ out "error: ./content/powder-farmer.md: missing devtoId field in front matter, might be 386003: https://dev.to/maelvls/powder-farmer/edit" }}
-
-At this point, you need to open each of your Hugo post and add some fields to
-their front matters. For example, in ./content/brick-chest.md, we add this:
-
-    devtoId: 386001       {{ grey "# This is the DEV ID as seen in hudevto devto list" }}
-    devtoPublished: true  {{ grey "# When false, the DEV article will stay a draft" }}
-    devtoSkip: false      {{ grey "# When true, hudevto will ignore this post." }}
-
-The status should have changed:
-
-    {{ cmd "hudevto status" }}
-    {{ out "info: ./content/brick-chest.md will be pushed published to https://dev.to/maelvls/brick-chest/edit" }}
-    {{ out "info: ./content/cloth-impossible.md will be pushed published to https://dev.to/maelvls/cloth-impossible/edit" }}
-    {{ out "info: ./content/powder-farmer.md will be pushed published to https://dev.to/maelvls/powder-farmer/edit" }}
-
-Finally, you can push to DEV:
-
-    {{ cmd "hudevto push" }}
-    {{ out "success: ./content/brick-chest.md pushed to https://dev.to/maelvls/brick-chest-2588" }}
-    {{ out "success: ./content/cloth-impossible.md pushed to https://dev.to/maelvls/cloth-impossible-95dc" }}
-    {{ out "success: ./content/powder-farmer.md pushed to https://dev.to/maelvls/powder-farmer-6a18" }}
-
-{{ section "TRANSFORMATIONS" }}
-The Markdown for Hugo posts and {{ url "dev.to" }} articles have slight differences.
-Before pushing to {{ url "dev.to" }}, hudevto does some transformations to the Markdown
-file. To see the transformations before pushing the Hugo post to dev.to, use one of:
-
-    {{ cmd "hudevto diff ./debug-k8s/index.md" }}
-
-The transformations are:
-
-1. ABSOLUTE MARKDOWN IMAGES: the relative image links are absolutified since
-   dev.to needs the image path to be absolute (the base URL itself is not
-   required).
-
-   The following Hugo Markdown snippet:
-
-     ![wireshark](wireshark.png)
-
-    becomes:
-
-      ![wireshark](/debug-k8s/wireshark.png)
-                   <--(1)--->
-
-    where (1) is the article's Hugo permalink to the ./debug-k8s/index.md post.
-    Note that the ![]() tag must span a single line. Otherwise, it won't be
-    transformed.
-
-2. ABSOLUTE HTML IMG TAGS: unlike with Markdown images, the <img> HTML tags
-   need to be absolute and needs to contain the base URL. For example, the
-   following HTML:
-
-        <img src="wireshark.png">
-
-    gets transformed to:
-
-        <img src="https://maelvls/debug-k8s/wireshark.png">
-
-    The <img> tag must be on a single line, and the "src" value must end with
-	one of the following extensions: png, PNG, jpeg, JPG, jpg, gif, GIF, svg,
-	SVG.
-
-3. SHORTCODES: Hugo shortcodes for embedding (like for embedding a Youtube video)
-   are turned into Liquid tags that dev.to knows about.
-4. ANCHOR IDS: Hugo and Devto have different anchor ID syntaxes.
-
-{{ section "OPTIONS" }}
-`
 
 func main() {
-	printHelpWithPager := func() {
-		t, err := template.New("test").Funcs(map[string]interface{}{
-			"section": ansi.ColorFunc("black+hb"),
-			"url":     ansi.ColorFunc("white+u"),
-			"grey":    ansi.ColorFunc("white+d"),
-			"yel":     ansi.ColorFunc("yellow"),
-			"cmd": func(cmd string) string {
-				return ansi.ColorFunc("white+d")("% ") + ansi.ColorFunc("yellow+b")(cmd)
-			},
-			"out": ansi.ColorFunc("white+d"),
-		}).Parse(help)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		pager.Main(context.Background(), func(_ context.Context, out io.WriteCloser) int {
-			err = t.Execute(out, nil)
-			if err != nil {
-				log.Fatal(err)
-			}
-			flag.CommandLine.SetOutput(out)
-			flag.PrintDefaults()
-
-			return 0
-		})
+	rootCmd := mainCmd()
+	err := fang.Execute(context.Background(), rootCmd, fang.WithErrorHandler(func(w io.Writer, styles fang.Styles, err error) {
+		fang.DefaultErrorHandler(w, styles, err)
+	}))
+	if err != nil {
+		os.Exit(1)
 	}
+}
 
-	printUsage := func(withOptions bool) func() {
-		return func() {
-			t, err := template.New("test").Parse(usageErrMsg)
-			if err != nil {
-				log.Fatal(err)
-			}
-			err = t.Execute(flag.CommandLine.Output(), struct{ WithOptionsSection bool }{
-				WithOptionsSection: withOptions,
-			})
-			if err != nil {
-				log.Fatal(err)
-			}
+func mainCmd() *cobra.Command {
+	var rootDir, apiKeyFlag string
+	cmd := &cobra.Command{
+		Use:   "hudevto",
+		Short: "Synchronize your Hugo posts with your DEV articles.",
+		Long: undent.Undent(`
+			hudevto allows you to synchronize your Hugo posts with your DEV articles. The
+			synchronization is one way (Hugo to DEV). A Hugo post is only pushed when a
+			change is detected. When pushed to DEV, the Hugo article is transformed a bit,
+			e.g., relative image links are absolutified.
 
-			if withOptions {
-				flag.PrintDefaults()
-			}
-		}
+			For more information about the transformation, see:
+			    https://github.com/maelvls/hudevto/blob/main/README.md
+		`),
 	}
+	cmd.PersistentFlags().StringVar(&rootDir, "root", "", "Root directory of the Hugo project.")
+	cmd.PersistentFlags().StringVar(&apiKeyFlag, "apikey", "", "The API key for Dev.to. You can also set DEVTO_APIKEY instead.")
+	cmd.PersistentFlags().BoolVar(&logutil.EnableDebug, "debug", false, "Print debug information such as the HTTP requests that are being made in curl format.")
 
-	flag.Usage = printUsage(true)
+	cmd.AddCommand(statusCmd(), pushCmd(), previewCmd(), diffCmd(), devtoCmd())
+	return cmd
+}
 
-	flag.Parse()
-	logutil.EnableDebug = *debug
+func statusCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "status [POST]",
+		Short: "Show the status of each post (or a single post)",
+		Long: undent.Undent(`
+			Shows the status of each post (or of a single post). The status shows
+      		whether it is mapped to a DEV article and if a push is required when the
+      		Hugo post has changes that are not on DEV yet.
+		`),
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			apiKey, err := getApiKey(cmd)
+			if err != nil {
+				return err
+			}
+			var pathToArticle string
+			if len(args) > 0 {
+				pathToArticle = args[0]
+			}
+			rootDir, err := getRootDir(cmd)
+			if err != nil {
+				return fmt.Errorf("--root: %w", err)
+			}
+			rootDir = filepath.Clean(rootDir)
+			return PushArticlesFromHugoToDevto(rootDir, pathToArticle, false, false, true, apiKey)
+		},
+	}
+	return cmd
+}
 
+func pushCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "push [POST]",
+		Short: "Push the given Hugo Markdown post to DEV.",
+		Long: undent.Undent(`
+			Pushes the given Hugo Markdown post to DEV. If no post is given, then
+			all posts are pushed. The post must be a Markdown file, i.e., *.md.
+		`),
+		Example: undent.Undent(`
+			hudevto push ./content/post-1/index.md
+		`),
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			apiKey, err := getApiKey(cmd)
+			if err != nil {
+				return fmt.Errorf("while getting API key: %w", err)
+			}
+			var pathToArticle string
+			if len(args) > 0 {
+				pathToArticle = args[0]
+			}
+			rootDir, err := getRootDir(cmd)
+			if err != nil {
+				return err
+			}
+			return PushArticlesFromHugoToDevto(rootDir, pathToArticle, false, false, false, apiKey)
+		},
+	}
+	return cmd
+}
+
+func previewCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "preview [POST]",
+		Short: "Display a Markdown preview of the Hugo post as it would appear on DEV.",
+		Long: undent.Undent(`
+			Displays a Markdown preview of the Hugo post that has been converted into
+			the DEV article Markdown format. You can use this command to check that
+			the tranformations were correctly applied.
+		`),
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			apiKey, err := getApiKey(cmd)
+			if err != nil {
+				return fmt.Errorf("while getting API key: %w", err)
+			}
+			var pathToArticle string
+			if len(args) > 0 {
+				pathToArticle = args[0]
+			}
+			if len(args) == 0 {
+				return fmt.Errorf("no post given, please provide a post to preview")
+			}
+			rootDir, err := getRootDir(cmd)
+			if err != nil {
+				return err
+			}
+			return PushArticlesFromHugoToDevto(rootDir, pathToArticle, true, false, true, apiKey)
+		},
+	}
+	return cmd
+}
+
+func diffCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "diff [POST]",
+		Short: "Display a diff between the Hugo post and the DEV article.",
+		Long: undent.Undent(`
+		 	Displays a diff between the Hugo post and the DEV article. It is useful
+      		when you want to see what changes will be pushed.
+		`),
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			apiKey, err := getApiKey(cmd)
+			if err != nil {
+				return fmt.Errorf("while getting API key: %w", err)
+			}
+
+			var pathToArticle string
+			if len(args) > 0 {
+				pathToArticle = args[0]
+			}
+
+			rootDir, err := getRootDir(cmd)
+			if err != nil {
+				return err
+			}
+			return PushArticlesFromHugoToDevto(rootDir, pathToArticle, false, true, true, apiKey)
+		},
+	}
+	return cmd
+}
+
+func devtoCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "devto list",
+		Short: "List all the articles you have on your DEV account.",
+		Long: undent.Undent(`
+			Lists all the articles you have on your DEV account.
+		`),
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if args[0] != "list" {
+				return fmt.Errorf("usage: hudevto devto list")
+			}
+			apiKey, err := getApiKey(cmd)
+			if err != nil {
+				return err
+			}
+			return PrintDevtoArticles(apiKey)
+		},
+	}
+	return cmd
+}
+
+func getRootDir(cmd *cobra.Command) (string, error) {
+	rootDir, err := cmd.Flags().GetString("root")
+	if err != nil {
+		return "", fmt.Errorf("--root: %w", err)
+	}
+	rootDir = filepath.Clean(rootDir)
+	return rootDir, nil
+}
+
+func getApiKey(cmd *cobra.Command) (string, error) {
 	apiKey := os.Getenv("DEVTO_APIKEY")
-	if *apiKeyFlag != "" {
-		apiKey = *apiKeyFlag
+
+	apiKeyFlag, err := cmd.Flags().GetString("apikey")
+	if err != nil {
+		return "", fmt.Errorf("while getting --apikey flag: %w", err)
+	}
+	if apiKeyFlag != "" {
+		apiKey = apiKeyFlag
 	}
 	if apiKey == "" {
-		logutil.Errorf("no API key given, either give it with --apikey or with DEVTO_APIKEY")
+		return "", fmt.Errorf("no API key given, either give it with --apikey or with DEVTO_APIKEY")
 	}
-
-	_, err := os.Getwd()
-	if err != nil {
-		logutil.Errorf("while getting current working directory: %s", err)
-		os.Exit(1)
-	}
-
-	if *rootDir != "" {
-		err := os.Chdir(*rootDir)
-		if err != nil {
-			logutil.Errorf("while changing directory to %s: %s", *rootDir, err)
-			os.Exit(1)
-		}
-	}
-	pathToArticle := flag.Arg(1) // May be empty.
-	if strings.HasPrefix(pathToArticle, *rootDir) {
-		pathToArticle = strings.TrimPrefix(pathToArticle, *rootDir+string(filepath.Separator))
-	}
-
-	switch flag.Arg(0) {
-	case "push":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), pathToArticle, false, false, false, apiKey)
-		if err != nil {
-			logutil.Errorf(err.Error())
-			os.Exit(1)
-		}
-	case "preview":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), pathToArticle, true, false, true, apiKey)
-		if err != nil {
-			logutil.Errorf(err.Error())
-			os.Exit(1)
-		}
-	case "diff":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), pathToArticle, false, true, true, apiKey)
-		if err != nil {
-			logutil.Errorf(err.Error())
-			os.Exit(1)
-		}
-	case "status":
-		err := PushArticlesFromHugoToDevto(filepath.Clean(*rootDir), pathToArticle, false, false, true, apiKey)
-		if err != nil {
-			logutil.Errorf(err.Error())
-			os.Exit(1)
-		}
-	case "devto":
-		if flag.Arg(1) == "list" {
-			err := PrintDevtoArticles(apiKey)
-			if err != nil {
-				logutil.Errorf(err.Error())
-				os.Exit(1)
-			}
-		} else {
-			logutil.Errorf("usage: hudevto devto list")
-			os.Exit(1)
-		}
-	case "list":
-		logutil.Errorf("did you mean 'list'? Try the command:\n    hudevto devto list")
-		os.Exit(1)
-	case "help":
-		printHelpWithPager()
-		os.Exit(0)
-	case "":
-		logutil.Errorf("no command has been given.")
-		printUsage(false)()
-		os.Exit(124)
-	default:
-		logutil.Errorf("unknown command '%s'.", flag.Arg(0))
-		printUsage(false)()
-		os.Exit(124)
-	}
+	return apiKey, nil
 }
 
 // Updates all articles if pathToArticle is left empty. The pathToArticle must
@@ -348,9 +257,10 @@ func PushArticlesFromHugoToDevto(rootDirOrEmpty, relPathToArticle string, showMa
 	}
 	logutil.Debugf("using rootDir='%s', rootDirOrEmpty='%s'", logutil.Gray(rootDir), logutil.Gray(rootDirOrEmpty))
 
+	fs := hugofs.NewBasePathFs(hugofs.Os, rootDir)
 	configs, err := allconfig.LoadConfig(allconfig.ConfigSourceDescriptor{
-		Fs:       hugofs.Os,
-		Filename: filepath.Join(rootDir, "config.yaml"),
+		Fs:       fs,
+		Filename: "config.yaml",
 	})
 	if err != nil {
 		return fmt.Errorf("while loading config: %w", err)
@@ -361,12 +271,8 @@ func PushArticlesFromHugoToDevto(rootDirOrEmpty, relPathToArticle string, showMa
 	configProvider.Set("publishDir", "unused")
 	configProvider.Set("themesDir", filepath.Join(rootDir, "themes"))
 
-	if len(rootDir) < 2 {
-		return fmt.Errorf("the root directory '%s' is too short", rootDir)
-	}
-
 	sites, err := hugolib.NewHugoSites(deps.DepsCfg{
-		Fs:      hugofs.NewFromSourceAndDestination(hugofs.Os, hugofs.Os, configProvider),
+		Fs:      hugofs.NewFromSourceAndDestination(fs, fs, configProvider),
 		Configs: configs,
 	})
 	if err != nil {
@@ -407,13 +313,9 @@ func PushArticlesFromHugoToDevto(rootDirOrEmpty, relPathToArticle string, showMa
 
 	pages := sites.Pages()
 	if relPathToArticle != "" {
-		pathArt := sites.AbsPathify(relPathToArticle)
-		if pathArt == "" {
-			return fmt.Errorf("%s not found", path.Join(rootDirOrEmpty, logutil.Gray(relPathToArticle)))
-		}
-		p := sites.GetContentPage(pathArt)
+		p := sites.GetContentPage("/" + relPathToArticle)
 		if p == nil {
-			return fmt.Errorf("%s was found but does not seem to be a page", path.Join(rootDirOrEmpty, logutil.Gray(relPathToArticle)))
+			return fmt.Errorf("not found: %s", path.Join(rootDirOrEmpty, logutil.Gray(relPathToArticle)))
 		}
 
 		pages = []page.Page{p}
@@ -544,7 +446,7 @@ func PushArticlesFromHugoToDevto(rootDirOrEmpty, relPathToArticle string, showMa
 		img := ""
 		var imgs []string
 		imgsRaw, err := page.Param("images")
-		_, isEmptyArray := imgsRaw.([]interface{})
+		_, isEmptyArray := imgsRaw.([]any)
 		if imgsRaw != nil && !isEmptyArray && err == nil {
 			var ok bool
 			imgs, ok = imgsRaw.([]string)
