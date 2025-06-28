@@ -55,7 +55,7 @@ usage:
 {{- if .WithOptionsSection}}
 
 options:
-{{ end -}}
+{{ end }}
 `
 
 const help = `
